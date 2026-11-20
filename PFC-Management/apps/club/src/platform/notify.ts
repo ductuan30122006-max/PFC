@@ -7,6 +7,7 @@ import {
   notifications,
 } from "@/db/schema";
 import type { NotifyType } from "@/domain/notify-events";
+import { notifyIcon, resolveNotifyScope } from "@/domain/notify-scope";
 import { clubFlags } from "@/platform/flags";
 import { logJson } from "@/platform/logger";
 import { incMetric } from "@/platform/metrics";
@@ -114,7 +115,23 @@ export function listNotifications(
     .where(eq(notifications.recipientId, recipientId))
     .orderBy(desc(notifications.createdAt))
     .all();
-  return opts?.unreadOnly ? rows.filter((r) => !r.readAt) : rows;
+  const filtered = opts?.unreadOnly ? rows.filter((r) => !r.readAt) : rows;
+  return filtered.map((r) => {
+    let payload: Record<string, unknown> | null = null;
+    if (r.payloadJson) {
+      try {
+        payload = JSON.parse(r.payloadJson) as Record<string, unknown>;
+      } catch {
+        payload = null;
+      }
+    }
+    return {
+      ...r,
+      scope: resolveNotifyScope(r.type, payload),
+      icon: notifyIcon(r.type),
+      unread: !r.readAt,
+    };
+  });
 }
 
 export function markNotificationRead(

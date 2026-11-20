@@ -723,6 +723,92 @@ export function getMyMembership(clubId: string, memberId: string) {
     .all()[0];
 }
 
+/**
+ * SSO / Google first login → active membership with default position `member`
+ * (THANH_VIEN). Idempotent if already pending/active.
+ */
+export function ensureSsoMemberOnboarding(user: SessionUser): string {
+  const club = getPrimaryClub();
+  const existing = getMyMembership(club.id, user.id);
+  if (existing && ["pending", "active"].includes(existing.status)) {
+    if (existing.status === "pending") {
+      const now = new Date();
+      sqlite.transaction(() => {
+        db.update(memberships)
+          .set({
+            status: "active",
+            position: "member",
+            effectiveFrom: existing.effectiveFrom ?? now,
+            effectiveTo: null,
+            updatedAt: now,
+          })
+          .where(eq(memberships.id, existing.id))
+          .run();
+        db.insert(membershipHistory)
+          .values({
+            id: nanoid(),
+            membershipId: existing.id,
+            fromStatus: "pending",
+            toStatus: "active",
+            actorId: user.id,
+            note: "sso_onboard",
+          })
+          .run();
+      })();
+    }
+    return existing.id;
+  }
+  const id = existing?.status === "left" ? existing.id : nanoid();
+  const now = new Date();
+  sqlite.transaction(() => {
+    if (existing?.status === "left") {
+      db.update(memberships)
+        .set({
+          status: "active",
+          position: "member",
+          joinReason: "sso_google",
+          rejectReason: null,
+          effectiveFrom: now,
+          effectiveTo: null,
+          updatedAt: now,
+        })
+        .where(eq(memberships.id, existing.id))
+        .run();
+    } else {
+      db.insert(memberships)
+        .values({
+          id,
+          clubId: club.id,
+          memberId: user.id,
+          position: "member",
+          status: "active",
+          joinReason: "sso_google",
+          effectiveFrom: now,
+        })
+        .run();
+    }
+    db.insert(membershipHistory)
+      .values({
+        id: nanoid(),
+        membershipId: id,
+        fromStatus: existing?.status ?? "none",
+        toStatus: "active",
+        actorId: user.id,
+        note: "sso_onboard_member",
+      })
+      .run();
+    writeAudit({
+      clubId: club.id,
+      actorId: user.id,
+      action: "membership.sso_onboard",
+      objectType: "membership",
+      objectId: id,
+      meta: { position: "member" },
+    });
+  })();
+  return id;
+}
+
 export function countActiveOwners(clubId: string): number {
   return db
     .select()

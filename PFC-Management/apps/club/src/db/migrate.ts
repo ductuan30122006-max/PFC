@@ -45,11 +45,13 @@ export async function seedDemo(): Promise<void> {
   const { ensurePmDemoTasks } = await import("@/server/tasks");
   const { ensureHrDemoMembers } = await import("@/server/clubs");
   const { ensureRoleDemoAccounts } = await import("./role-demo-accounts");
+  const { ensureDemoNotifications } = await import("@/platform/notify-demo");
   const primary = db.select().from(clubs).all()[0];
   if (primary) {
     ensureRoleDemoAccounts(primary.id);
     ensurePmDemoTasks(primary.id);
     ensureHrDemoMembers(primary.id);
+    ensureDemoNotifications(primary.id);
   }
 }
 

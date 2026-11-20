@@ -11,6 +11,8 @@ export const members = sqliteTable("members", {
   email: text("email").notNull().unique(),
   fullName: text("full_name").notNull(),
   passwordHash: text("password_hash").notNull(),
+  /** Optional avatar from Google / Platform SSO profile. */
+  avatarUrl: text("avatar_url"),
   isSuperAdmin: integer("is_super_admin", { mode: "boolean" })
     .notNull()
     .default(false),

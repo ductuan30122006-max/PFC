@@ -4,6 +4,7 @@ import { errorEnvelope, AppError } from "@/lib/errors";
 import { parseSsoClaimsFromIdToken, isSsoEnabled } from "@/platform/sso";
 import { seedDemo } from "@/db/migrate";
 import { newCorrelationId } from "@/lib/auth";
+import { ensureSsoMemberOnboarding } from "@/server/clubs";
 
 export async function GET(req: Request) {
   const correlationId = newCorrelationId();
@@ -21,8 +22,9 @@ export async function GET(req: Request) {
       throw new AppError("SSO_INVALID", "Missing id_token from Platform Core", 400);
     }
     const claims = parseSsoClaimsFromIdToken(idToken);
-    await loginWithSsoClaims(claims);
-    return NextResponse.redirect(new URL("/", req.url));
+    const user = await loginWithSsoClaims(claims);
+    ensureSsoMemberOnboarding(user);
+    return NextResponse.redirect(new URL("/lobby", req.url));
   } catch (err) {
     const envelope = errorEnvelope(err, correlationId);
     const login = new URL("/login", req.url);

@@ -176,6 +176,16 @@ export function migrateUp(): void {
   ensureTeamNameUnique();
   ensureActivityRichColumns();
   ensureTaskHierarchyColumns();
+  ensureMemberAvatarColumn();
+}
+
+function ensureMemberAvatarColumn(): void {
+  if (!tableExists("members")) return;
+  const cols = sqlite
+    .prepare(`PRAGMA table_info(members)`)
+    .all() as { name: string }[];
+  if (cols.some((c) => c.name === "avatar_url")) return;
+  sqlite.exec(`ALTER TABLE members ADD COLUMN avatar_url TEXT`);
 }
 
 /** Sub-task assignee/deadline + parent activity link (idempotent ALTER). */

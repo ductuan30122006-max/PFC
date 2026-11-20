@@ -91,11 +91,84 @@ export async function GET(req: Request) {
     }
 
     if (action === "sso_status") {
+      const { googleOAuthConfig, isGoogleOAuthEnabled } = await import(
+        "@/platform/google-oauth"
+      );
+      const g = googleOAuthConfig();
       return NextResponse.json({
         ok: true,
         sso: {
           enabled: isSsoEnabled(),
           mode: process.env.PLATFORM_SSO_MODE ?? "off",
+        },
+        google: {
+          enabled: isGoogleOAuthEnabled(),
+          mode: g.mode,
+        },
+        correlationId,
+      });
+    }
+
+    if (action === "hub_status") {
+      const { hubBySlug, hubOrigin } = await import("@/domain/hub-branches");
+      const slug = url.searchParams.get("slug") ?? "";
+      const branch = hubBySlug(slug);
+      if (!branch) {
+        return NextResponse.json(
+          { ok: false, error: { message: "Unknown hub" }, correlationId },
+          { status: 404 },
+        );
+      }
+      if (branch.open === "internal") {
+        return NextResponse.json({
+          ok: true,
+          hub: {
+            slug: branch.slug,
+            ready: true,
+            open: branch.open,
+            path: branch.internalPath,
+            live: true,
+          },
+          correlationId,
+        });
+      }
+      if (branch.open === "soon" || !branch.ready) {
+        return NextResponse.json({
+          ok: true,
+          hub: {
+            slug: branch.slug,
+            ready: false,
+            open: "soon",
+            live: false,
+          },
+          correlationId,
+        });
+      }
+      const origin = hubOrigin(branch);
+      let live = false;
+      if (origin) {
+        try {
+          const ping = await fetch(origin, {
+            method: "GET",
+            signal: AbortSignal.timeout(2500),
+            redirect: "manual",
+          });
+          // Any HTTP response means the process is up (even 404/302)
+          live = ping.status > 0;
+        } catch {
+          live = false;
+        }
+      }
+      return NextResponse.json({
+        ok: true,
+        hub: {
+          slug: branch.slug,
+          ready: branch.ready,
+          open: branch.open,
+          origin,
+          live,
+          runHint: branch.runHint,
+          modulePath: branch.modulePath,
         },
         correlationId,
       });
@@ -419,6 +492,15 @@ export async function POST(req: Request) {
       return NextResponse.json({
         ok: true,
         sso: started,
+        correlationId,
+      });
+    }
+    if (action === "google_start") {
+      const { buildGoogleStartUrl } = await import("@/platform/google-oauth");
+      const started = buildGoogleStartUrl();
+      return NextResponse.json({
+        ok: true,
+        google: started,
         correlationId,
       });
     }

@@ -60,11 +60,12 @@ export async function login(email: string, password: string): Promise<SessionUse
   return establishSession(user);
 }
 
-/** ADR-008 — establish session from Platform Core SSO claims (consume, not IdP). */
+/** ADR-008 — establish session from Platform / Google SSO claims (consume, not IdP). */
 export async function loginWithSsoClaims(claims: {
   sub: string;
   email: string;
   name: string;
+  picture?: string | null;
 }): Promise<SessionUser> {
   const email = claims.email.trim().toLowerCase();
   const linked = db
@@ -85,6 +86,7 @@ export async function loginWithSsoClaims(claims: {
         email,
         fullName: claims.name || email,
         passwordHash: "!",
+        avatarUrl: claims.picture ?? null,
         isSuperAdmin: false,
       })
       .run();
@@ -92,10 +94,19 @@ export async function loginWithSsoClaims(claims: {
       .values({ memberId: id, platformMemberId: claims.sub })
       .run();
     user = db.select().from(members).where(eq(members.id, id)).all()[0]!;
-  } else if (!linked) {
-    db.insert(memberPlatformIds)
-      .values({ memberId: user.id, platformMemberId: claims.sub })
-      .run();
+  } else {
+    if (!linked) {
+      db.insert(memberPlatformIds)
+        .values({ memberId: user.id, platformMemberId: claims.sub })
+        .run();
+    }
+    const patch: { fullName?: string; avatarUrl?: string | null } = {};
+    if (claims.name && claims.name !== user.fullName) patch.fullName = claims.name;
+    if (claims.picture) patch.avatarUrl = claims.picture;
+    if (Object.keys(patch).length) {
+      db.update(members).set(patch).where(eq(members.id, user.id)).run();
+      user = db.select().from(members).where(eq(members.id, user.id)).all()[0]!;
+    }
   }
   return establishSession(user);
 }

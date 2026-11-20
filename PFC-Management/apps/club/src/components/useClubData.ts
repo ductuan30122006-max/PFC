@@ -156,6 +156,10 @@ export type ClubHomeData = {
     body: string;
     readAt: string | Date | null;
     createdAt: string | Date;
+    payloadJson?: string | null;
+    scope?: "club" | "team" | "personal";
+    icon?: string;
+    unread?: boolean;
   }[];
 };
 

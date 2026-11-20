@@ -5,11 +5,10 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const ITEMS = [
-  { href: "/", label: "Trang chủ", icon: "🏠" },
-  { href: "/members", label: "Thành viên", icon: "👥" },
-  { href: "/tasks", label: "Công việc", icon: "✅" },
-  { href: "/events", label: "Sự kiện", icon: "📅" },
-  { href: "/manage", label: "Quản lý", icon: "⚙️" },
+  { href: "/lobby", label: "Phòng khách", icon: "🏠" },
+  { href: "/notifications", label: "Thông báo", icon: "📢" },
+  { href: "/tasks", label: "Công việc", icon: "📋" },
+  { href: "/settings", label: "Cài đặt", icon: "⚙️" },
 ] as const;
 
 export function PfcLogo({
@@ -22,7 +21,7 @@ export function PfcLogo({
   return (
     <span className={className} style={{ width: size, height: size }}>
       <Image
-        src="/pfc-logo.png"
+        src="/pfc-logo.svg"
         alt="Personal Finance Club"
         width={size}
         height={size}
@@ -34,14 +33,14 @@ export function PfcLogo({
 
 export function BottomNav() {
   const pathname = usePathname();
-  if (pathname === "/login") return null;
+  if (pathname === "/login" || pathname.startsWith("/login")) return null;
 
   return (
-    <nav className="bottom-nav">
+    <nav className="bottom-nav" aria-label="Điều hướng chính">
       {ITEMS.map((item) => {
         const active =
-          item.href === "/"
-            ? pathname === "/"
+          item.href === "/lobby"
+            ? pathname === "/lobby" || pathname === "/"
             : pathname.startsWith(item.href);
         return (
           <Link
@@ -67,17 +66,25 @@ export function AppHeader({
 }) {
   return (
     <div className="app-header">
-      <Link href="/" aria-label="Về trang chủ">
+      <Link href="/lobby" aria-label="Về Phòng khách">
         <PfcLogo />
       </Link>
       {showSearch ? (
-        <Link href="/members" className="search-pill" aria-label="Tìm thành viên">
+        <Link
+          href="/members"
+          className="search-pill"
+          aria-label="Tìm thành viên"
+        >
           🔍 Tìm kiếm trong CLB...
         </Link>
       ) : (
         <h1>{title}</h1>
       )}
-      <Link href="/manage#thong-bao" className="icon-btn" aria-label="Thông báo">
+      <Link
+        href="/notifications"
+        className="icon-btn"
+        aria-label="Thông báo"
+      >
         🔔
       </Link>
     </div>
