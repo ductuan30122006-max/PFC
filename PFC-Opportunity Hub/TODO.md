@@ -11,7 +11,8 @@ Baseline: SRS **220–245** · App: `web/` · Refs: `ref-repos/`
 ## Remaining / optional
 - [x] Session login (opaque token). Client cannot set member id.
 - [x] Expire/remind locked with `x-cron-secret`
-- [ ] PostgreSQL — `docker-compose.yml` ready; Docker is not installed. App stays on SQLite until a Postgres `DATABASE_URL` exists. Do not point Prisma at Postgres without a server.
+- [x] Production DB: Turso (libSQL) qua Prisma driver adapter — ADR-005. Local vẫn SQLite file. (Postgres không còn là mục tiêu.)
+- [x] Serverless: `GET /api/jobs/tick` + Vercel Cron, CV lưu trong DB khi `OPP_FILE_STORAGE=db` — ADR-005.
 - [x] Notification outbox (in-app / email / push) + retry. Email/push stay `SKIPPED` until SMTP or push webhook is set.
 - [x] Private CV + signed URL (10 phút). Không trả storage path.
 - [x] Worker `npm run worker` chạy expire / remind / dispatch. API job vẫn cần `x-cron-secret`.

@@ -72,3 +72,16 @@ describe("helpers", () => {
     expect(averageRating([])).toBeNull();
   });
 });
+
+describe("VNPAY orders", () => {
+  it("cannot be confirmed before payment, never marked paid by hand, keep paid on completion", async () => {
+    const { applyOrderAction } = await import("./orders");
+    const unpaid = { status: "placed" as const, paymentMethod: "vnpay" as const, paymentStatus: "unpaid" as const };
+    expect(applyOrderAction(unpaid, "confirm", "seller").ok).toBe(false);
+    expect(applyOrderAction(unpaid, "mark_paid", "seller").ok).toBe(false);
+    expect(applyOrderAction(unpaid, "cancel", "buyer")).toMatchObject({ ok: true, status: "cancelled" });
+    const paid = { ...unpaid, paymentStatus: "paid" as const };
+    expect(applyOrderAction(paid, "confirm", "seller")).toMatchObject({ ok: true, status: "confirmed" });
+    expect(applyOrderAction({ ...paid, status: "delivered" }, "complete", "buyer")).toMatchObject({ ok: true, paymentStatus: "paid" });
+  });
+});

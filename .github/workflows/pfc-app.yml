@@ -1,0 +1,43 @@
+name: pfc-app
+
+on:
+  push:
+    paths:
+      - "PFC-App/**"
+      - ".github/workflows/pfc-app.yml"
+  pull_request:
+    paths:
+      - "PFC-App/**"
+      - ".github/workflows/pfc-app.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: PFC-App
+    env:
+      # Throwaway values for CI only (tests use temporary SQLite files; nothing is deployed from here).
+      PFC_SESSION_SECRET: ci-only-session-secret-0123456789abcdef
+      CLUB_SSO_SECRET: ci-only-club-sso-secret-0123456789abcdef
+      OPP_SSO_SECRET: ci-only-opp-sso-secret-0123456789abcdef
+      PFC_ENCRYPTION_KEY: ci-only-encryption-key-0123456789abcdef
+      PFC_ENV: local
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: PFC-App/package-lock.json
+      - run: npm ci
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Unit / service tests (incl. WCAG contrast, permissions, auth)
+        run: npm test
+      - name: Production build
+        run: npm run build

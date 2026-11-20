@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { requireMember, toActor } from "@/platform/auth/session";
 import { getCart } from "@/modules/market/server/service";
+import { onlinePaymentEnabled } from "@/modules/payments/server/service";
 import { AppHeader } from "@/ui";
 import { CheckoutForm } from "./CheckoutForm";
 
@@ -16,6 +17,7 @@ export default async function CheckoutPage() {
     <>
       <AppHeader back backFallback="/market/cart" title="Thanh toán" />
       <CheckoutForm
+        vnpay={onlinePaymentEnabled()}
         defaultName={me.fullName}
         needsAddress={cart.needsAddress}
         total={cart.total}

@@ -11,7 +11,8 @@
  */
 export const ORDER_STATUSES = ["placed", "confirmed", "shipping", "delivered", "completed", "cancelled"] as const;
 export type OrderStatus = (typeof ORDER_STATUSES)[number];
-export type PaymentMethod = "cod" | "bank_transfer" | "in_person";
+export type PaymentMethod = "cod" | "bank_transfer" | "in_person" | "vnpay";
+export type PaymentStatus = "unpaid" | "paid" | "refunded";
 export type OrderAction = "confirm" | "ship" | "deliver" | "complete" | "cancel" | "mark_paid";
 
 export const ORDER_STATUS_LABEL: Record<OrderStatus, string> = {
@@ -36,11 +37,12 @@ export const PAYMENT_LABEL: Record<PaymentMethod, string> = {
   cod: "Thanh toán khi nhận hàng (COD)",
   bank_transfer: "Chuyển khoản trực tiếp cho người bán",
   in_person: "Trả tiền khi gặp trực tiếp",
+  vnpay: "Thanh toán trực tuyến (VNPAY)",
 };
 
-export type OrderState = { status: OrderStatus; paymentMethod: PaymentMethod; paymentStatus: "unpaid" | "paid" };
+export type OrderState = { status: OrderStatus; paymentMethod: PaymentMethod; paymentStatus: PaymentStatus };
 export type Role = "buyer" | "seller";
-export type OrderTransition = { ok: true; status: OrderStatus; paymentStatus: "unpaid" | "paid" } | { ok: false; error: string };
+export type OrderTransition = { ok: true; status: OrderStatus; paymentStatus: PaymentStatus } | { ok: false; error: string };
 
 export function applyOrderAction(o: OrderState, action: OrderAction, role: Role, reason?: string): OrderTransition {
   const deny = (error: string): OrderTransition => ({ ok: false, error });
@@ -48,9 +50,11 @@ export function applyOrderAction(o: OrderState, action: OrderAction, role: Role,
   switch (action) {
     case "confirm":
       if (role !== "seller") return deny("Chỉ người bán xác nhận đơn.");
+      if (o.paymentMethod === "vnpay" && o.paymentStatus !== "paid") return deny("Đơn VNPAY: chờ người mua thanh toán xong.");
       return o.status === "placed" ? to("confirmed") : deny("Đơn không ở trạng thái chờ xác nhận.");
     case "mark_paid":
       if (role !== "seller") return deny("Chỉ người bán xác nhận đã nhận tiền.");
+      if (o.paymentMethod === "vnpay") return deny("Đơn VNPAY được ghi nhận thanh toán tự động.");
       if (o.status === "cancelled") return deny("Đơn đã hủy.");
       return o.paymentStatus === "unpaid" ? to(o.status, "paid") : deny("Đơn đã được ghi nhận thanh toán.");
     case "ship":
@@ -65,7 +69,7 @@ export function applyOrderAction(o: OrderState, action: OrderAction, role: Role,
       if (role !== "buyer") return deny("Chỉ người mua xác nhận đã nhận hàng.");
       if (o.status !== "delivered" && o.status !== "shipping") return deny("Chỉ xác nhận khi đơn đang giao hoặc đã giao.");
       // Receiving a COD / in-person order means it was paid at hand-over.
-      return to("completed", o.paymentMethod === "bank_transfer" ? o.paymentStatus : "paid");
+      return to("completed", o.paymentMethod === "bank_transfer" || o.paymentMethod === "vnpay" ? o.paymentStatus : "paid");
     case "cancel":
       if (role === "buyer") return o.status === "placed" ? to("cancelled") : deny("Đơn đã được xác nhận: liên hệ người bán để hủy.");
       if (o.status !== "placed" && o.status !== "confirmed") return deny("Không thể hủy đơn đã giao.");

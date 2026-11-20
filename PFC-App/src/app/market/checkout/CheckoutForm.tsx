@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { formatVnd } from "@/lib/money";
 import { PAYMENT_LABEL, type PaymentMethod } from "@/modules/market/domain/orders";
-import { checkoutAction } from "@/modules/market/server/actions";
+import { checkoutAction, checkoutVnpayAction } from "@/modules/market/server/actions";
 import { Button, Card, Section } from "@/ui";
 import { FormError, TextArea, TextInput } from "@/ui/Form";
 import { useAction } from "@/ui/use-action";
@@ -15,14 +15,17 @@ export function CheckoutForm({
   needsAddress,
   total,
   groups,
+  vnpay,
 }: {
+  vnpay: boolean;
   defaultName: string;
   needsAddress: boolean;
   total: number;
   groups: Array<{ shopName: string; total: number; items: Array<{ title: string; qty: number; price: number }> }>;
 }) {
   const router = useRouter();
-  const methods: PaymentMethod[] = needsAddress ? ["cod", "bank_transfer"] : ["in_person", "bank_transfer"];
+  const offline: PaymentMethod[] = needsAddress ? ["cod", "bank_transfer"] : ["in_person", "bank_transfer"];
+  const methods: PaymentMethod[] = vnpay && total >= 5_000 ? ["vnpay", ...offline] : offline;
   const [method, setMethod] = useState<PaymentMethod>(methods[0]);
   const [name, setName] = useState(defaultName);
   const [phone, setPhone] = useState("");
@@ -37,10 +40,9 @@ export function CheckoutForm({
       noValidate
       onSubmit={(e) => {
         e.preventDefault();
-        run(
-          () => checkoutAction({ paymentMethod: method, recipientName: name, recipientPhone: phone.replace(/\s/g, ""), address, note, checkoutKey }),
-          (ids) => router.replace(`/market/orders?placed=${ids.length}`),
-        );
+        const input = { paymentMethod: method, recipientName: name, recipientPhone: phone.replace(/\s/g, ""), address, note, checkoutKey };
+        if (method === "vnpay") run(() => checkoutVnpayAction(input), (r) => (window.location.href = r.payUrl));
+        else run(() => checkoutAction(input), (ids) => router.replace(`/market/orders?placed=${ids.length}`));
       }}
     >
       <Section title="Thông tin nhận hàng">
@@ -68,7 +70,9 @@ export function CheckoutForm({
           ))}
         </div>
         <p className="mt-2 text-[12px] leading-relaxed text-muted">
-          PFC chưa thu tiền hộ: bạn thanh toán trực tiếp cho người bán theo cách đã chọn. Thanh toán trực tuyến (VNPAY) sẽ được bổ sung sau.
+          {method === "vnpay"
+            ? "Bạn được chuyển tới VNPAY (thẻ ATM, QR ngân hàng, thẻ quốc tế). PFC giữ tiền tới khi đơn hoàn tất; đơn bị hủy được hoàn tiền tự động. Hàng được giữ 15 phút."
+            : "Bạn thanh toán trực tiếp cho người bán theo cách đã chọn; PFC không thu hộ khoản này."}
         </p>
       </Section>
       <Section title="Đơn hàng">
@@ -95,7 +99,7 @@ export function CheckoutForm({
       <Section>
         <FormError message={error} />
         <Button type="submit" block disabled={pending} className="mt-2">
-          {pending ? "Đang đặt hàng…" : `Đặt hàng · ${formatVnd(total)}`}
+          {pending ? "Đang đặt hàng…" : method === "vnpay" ? `Thanh toán · ${formatVnd(total)}` : `Đặt hàng · ${formatVnd(total)}`}
         </Button>
       </Section>
     </form>

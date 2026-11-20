@@ -15,7 +15,13 @@ export const CATEGORY_ICON: Record<string, LucideIcon> = {
   other: Package,
 };
 
-export function ListingThumb({ category, size = "md" }: { category: string; size?: "md" | "lg" }) {
+export function ListingThumb({ category, size = "md", image, alt = "" }: { category: string; size?: "md" | "lg"; image?: string; alt?: string }) {
+  if (image) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element -- server-processed WebP upload
+      <img src={image} alt={alt} loading="lazy" className={`w-full rounded-2xl bg-surface-2 object-cover ${size === "lg" ? "h-64" : "aspect-square"}`} />
+    );
+  }
   const Icon = CATEGORY_ICON[category] ?? Package;
   return (
     <span className={`grid w-full place-items-center rounded-2xl bg-primary-soft text-primary ${size === "lg" ? "h-44" : "aspect-square"}`}>
@@ -28,7 +34,7 @@ export function ListingThumb({ category, size = "md" }: { category: string; size
 export function ListingCard({ l }: { l: Listing }) {
   return (
     <Link href={`/market/p/${l.id}`} className="pressable flex flex-col gap-2 rounded-[var(--radius-card)] border border-line bg-surface p-2.5 shadow-card">
-      <ListingThumb category={l.category} />
+      <ListingThumb category={l.category} image={l.images[0]} alt={l.title} />
       <span className="line-clamp-2 min-h-[2.5em] text-[14px] leading-snug font-semibold text-ink">{l.title}</span>
       <span className="text-[15px] font-extrabold text-primary">{l.price === 0 ? "Miễn phí" : formatVnd(l.price)}</span>
       <span className="flex items-center gap-1 text-[12px] text-muted">

@@ -17,12 +17,14 @@ import {
   Skeleton,
 } from "@/ui";
 import { formatVnd } from "@/lib/money";
+import { ImageUploader } from "@/ui/ImageUploader";
 
 /** Living gallery of the shared mobile components, for designers and module teams. */
 export default function UiKitPage() {
   const [seg, setSeg] = useState<"a" | "b" | "c">("a");
   const [amount, setAmount] = useState("125000");
   const [open, setOpen] = useState(false);
+  const [photos, setPhotos] = useState<string[]>([]);
 
   return (
     <>
@@ -96,6 +98,10 @@ export default function UiKitPage() {
           <Skeleton className="h-14" />
           <Skeleton className="h-14 w-2/3" />
         </div>
+      </Section>
+
+      <Section title="Tải ảnh">
+        <ImageUploader purpose="listing" max={3} value={photos} onChange={setPhotos} />
       </Section>
 
       <Section title="Trạng thái trống">

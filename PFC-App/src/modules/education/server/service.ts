@@ -1,4 +1,5 @@
 import "server-only";
+import { notify } from "@/platform/notifications/service";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { all, one, run, tx } from "@/platform/db/client";
@@ -264,6 +265,12 @@ export async function transition(
   args.push(id);
   await run(`UPDATE ${table} SET status = ?, reject_reason = ?, updated_at = ?${extra} WHERE id = ?`, args);
   await audit(actor.id, `edu.${kind}.${action}`, `${kind}:${id}`, "success");
+  if (row.author_id !== actor.id && (res.to === "published" || res.to === "rejected" || res.to === "archived")) {
+    const label = { course: "Khóa học", quiz: "Bài kiểm tra", resource: "Tài liệu" }[kind];
+    const href = { course: `/learn/manage/courses/${id}`, quiz: `/learn/manage/quizzes/${id}`, resource: `/learn/manage/resources/${id}` }[kind];
+    const verb = res.to === "published" ? "đã được duyệt và công khai" : res.to === "rejected" ? "bị từ chối" : "đã bị gỡ";
+    await notify(row.author_id, { category: "learn", title: `${label} của bạn ${verb}`, body: res.to === "rejected" ? `Lý do: ${(reason ?? "").trim().slice(0, 200)}` : "", href, dedupeKey: `edu:${kind}:${id}:${res.to}:${now()}` });
+  }
   return res.to;
 }
 
@@ -697,13 +704,16 @@ export async function createThread(actor: Actor, input: unknown): Promise<string
 
 export async function reply(actor: Actor, threadId: string, body: unknown): Promise<void> {
   const b = z.string().trim().min(1, "Nhập nội dung trả lời.").max(5000).parse(body);
-  const t = await one<{ hidden: number; locked: number }>("SELECT hidden, locked FROM edu_threads WHERE id = ?", [threadId]);
+  const t = await one<{ hidden: number; locked: number; author_id: string; title: string }>("SELECT hidden, locked, author_id, title FROM edu_threads WHERE id = ?", [threadId]);
   if (!t || Number(t.hidden) === 1) throw new ActionError("Không tìm thấy chủ đề.");
   if (Number(t.locked) === 1) throw new ActionError("Chủ đề đã bị khóa bình luận.");
   await tx([
     { sql: "INSERT INTO edu_replies (id, thread_id, author_id, body, created_at) VALUES (?, ?, ?, ?, ?)", args: [randomUUID(), threadId, actor.id, b, now()] },
     { sql: "UPDATE edu_threads SET last_activity_at = ? WHERE id = ?", args: [now(), threadId] },
   ]);
+  if (t.author_id !== actor.id) {
+    await notify(t.author_id, { category: "learn", title: "Có trả lời mới trong chủ đề của bạn", body: t.title.slice(0, 120), href: `/learn/forum/${threadId}` });
+  }
 }
 
 export async function toggleLike(actor: Actor, threadId: string): Promise<boolean> {

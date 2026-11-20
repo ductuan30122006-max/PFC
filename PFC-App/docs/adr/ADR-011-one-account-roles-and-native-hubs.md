@@ -112,3 +112,55 @@ Each hub follows the same layout: `src/modules/<hub>/{domain (pure, tested), ser
   - `GOOGLE_CLIENT_ID/SECRET`, `FACEBOOK_APP_ID/SECRET`
   - `PFC_MAIL_MODE` (`log` for dev, `resend` with `RESEND_API_KEY` / `PFC_MAIL_FROM` for production)
   - `PFC_REQUIRE_EMAIL_VERIFICATION=1`
+
+## Addendum (20/11/2026): G1 account & profile, G2 notifications & search
+- **Sessions per device.**
+  - Every sign-in is a `member_sessions` row, and the session token carries its id.
+  - `currentMember()` refuses revoked rows. This powers the device list and "Đăng xuất tất cả thiết bị khác" (mockup 269).
+  - Sessions from before this change need one new login.
+- **Two-step login (268).**
+  - TOTP (RFC 6238, tested against the RFC vectors) plus 8 hashed backup codes. The secret is AES-256-GCM encrypted with `PFC_ENCRYPTION_KEY`.
+  - Codes cannot be replayed, and only failed attempts count toward the limit (5 per 15 minutes).
+  - Password and Google/Facebook sign-in both stop at `/login/2fa` (signed 5-minute challenge cookie) until the code is right.
+- **Profile (266).**
+  - Avatars are square-cropped and stripped of metadata.
+  - Changing the email needs the password and a link sent to the new address; the old address is warned.
+- **Privacy (272).** Only enforced options: hidden from member search, and not findable by email (project invites).
+- **Data (275).**
+  - JSON export of the member's own data.
+  - Deletion anonymises the account and deletes personal data, but keeps records other members depend on.
+  - Deletion is blocked for the last Chủ nhiệm, open orders and active projects.
+- **Consent.** The terms version is recorded at sign-up.
+- **Policies (274).** Drafts written from actual behaviour, with a visible "cần PFC/pháp chế duyệt" banner.
+- **Other G1 screens.** Landing (SYS-01, live counts), onboarding (SYS-07, interests reorder Home), help/FAQ, language (only Vietnamese is translated; others are marked "Sắp có").
+- **Notifications (NOT-01…05).**
+  - `notify()` stores the in-app item, then sends email and Web Push via `after()` according to per-category × channel preferences. Security notices are always in-app and by email.
+  - **Events wired:**
+    - **Marketplace:** new order, status changes, listing and seller decisions.
+    - **Dự án:** join requests, accept/decline, invite, removal, approval, task assigned, feedback.
+    - **Học tập:** content approval, replies to your thread.
+    - **Account:** new sign-in, password change/reset, 2FA on/off, email change.
+  - **Web Push:** VAPID (`web-push`); the subscribe endpoint only accepts real browser push services.
+- **Search (SYS-09/10).** Courses, resources, forum, listings, projects, verified opportunities (public Opportunity API), members (privacy-aware) and the member's own transactions. Recent searches stay on the device.
+- **Security upgrades in the same change.**
+  - Next.js 15.5.29 in all three apps (React flight RCE advisory).
+  - sharp 0.35.5 (libvips CVEs).
+  - @vercel/blob 2.4.0.
+  - Remaining audit items: vitest and zod need major upgrades, and Next's internal postcss copy is outside our control.
+
+## Addendum (20/11/2026): G3 Community, G4 Events, G5 Payments
+- **Community (COM-*, migration v9).** `src/modules/community`: feed (latest / following / top / saved / mine; topic, #tag, search), posts with images and polls, comments with replies, likes, saves, follow, block, member directory, 1-to-1 messages (polling, privacy option "ai được nhắn cho tôi"), reports and a moderation queue (`community.moderate`: BĐH, TB Truyền thông, Chủ nhiệm).
+  - **Groups are member-run and separate from the official Câu lạc bộ.** Public or private (join requests). Roles: owner, moderator, member. Moderators admit members and hide content; only the owner removes members, and removal bans them from re-joining.
+  - Hidden posts and comments stay visible to their author and moderators with the reason; blocking hides content both ways and stops messages.
+- **Events (EVT-*, migration v10).** `src/modules/events`: any member organizes; `draft → submitted → published` needs `event.approve` (BĐH, TB Sự kiện), and approvers publish directly. Reject and cancel need a reason.
+  - Up to 6 ticket types; capacity is checked per type and per event inside one write transaction. Paid tickets with VNPAY hold the seat for 15 minutes; "thu tại quầy" (`pay_at_door`) confirms at once and check-in asks the door to collect first.
+  - Tickets carry a random 12-character code (QR `PFC-EVT:<code>`); check-in by camera (`BarcodeDetector`, `Permissions-Policy camera=(self)`) or by typing the code; each ticket checks in once. Online links are shown only to confirmed attendees.
+  - Cancelling an event cancels every registration and refunds online-paid tickets automatically. Organizer dashboard, attendee CSV (formula-injection safe), day-before reminders, auto-complete via the daily job.
+- **Payments (PAY-*, migrations v11–v12).** `src/modules/payments`: VNPAY v2.1.0 (HMAC-SHA512, sorted params). Return URL and IPN both verify signature, merchant code and amount, and apply the result exactly once (`status = 'pending'` guard). Payments, items, events, refunds (with timeline), payouts.
+  - Modules plug in through `PaymentHooks` (`onPaid / onFailed / onRefunded / refundCheck / releasable / describe`), loaded lazily to avoid import cycles: `market/server/payment-hooks.ts`, `events/server/payment-hooks.ts`.
+  - **Marketplace:** checkout offers VNPAY when configured; VNPAY orders reach the seller only once paid, cannot be marked paid by hand, unpaid ones are cancelled and their stock returned (IPN failure or the daily job); a paid order cancelled by either side is refunded automatically.
+  - **Refunds** are requested by the payer and decided by the payee (seller / organizer) or `payments.manage` (Chủ nhiệm); rejecting needs a reason. Approval calls the VNPAY refund API; if that is unavailable the refund stays "processing" until the Chủ nhiệm records the bank-transfer reference.
+  - **Payouts:** PFC holds the money until the order is completed or the event has ended; the Chủ nhiệm creates a payout for releasable items and marks it paid with the transfer reference. Platform fee `PFC_PLATFORM_FEE_BPS` (default 0).
+  - **Not built:** a PFC wallet (top-up / withdraw) — that needs an e-wallet licence. Real-money production needs a VNPAY merchant contract in PFC's legal name.
+- **Jobs.** `/api/jobs/tick` (`Authorization: Bearer CRON_SECRET`, daily Vercel Cron): expire abandoned payments and VNPAY orders, event reminders, complete finished events.
+- **Decisions taken without a PFC answer (to confirm):** groups separate from the Club; VNPAY sandbox until keys exist; fee 0; payee decides refunds; payee cancellation refunds automatically; paid events may collect at the door.

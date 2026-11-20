@@ -40,6 +40,13 @@ export const PERMISSIONS = {
   "project.approve": "Duyệt / từ chối dự án để công khai",
   "project.archive_any": "Lưu trữ dự án của người khác",
   "project.manage_any": "Can thiệp mọi dự án: mời / loại thành viên, đổi vai trò, ẩn phản hồi",
+  // Community Hub
+  "community.moderate": "Ẩn bài viết / bình luận, xử lý báo cáo vi phạm, lưu trữ nhóm cộng đồng",
+  // Shared Event Engine
+  "event.approve": "Duyệt / từ chối / hủy sự kiện để công khai",
+  // Payments
+  "payments.view": "Xem giao dịch thanh toán, hoàn tiền, đối soát",
+  "payments.manage": "Duyệt hoàn tiền, ghi nhận chi trả cho người bán",
   // Platform administration
   "admin.members.view": "Xem danh sách tài khoản",
   "admin.roles.manage": "Phân vai trò cho tài khoản khác",
@@ -50,8 +57,8 @@ export type Permission = keyof typeof PERMISSIONS;
 /** Department-scoped grants for Trưởng ban. */
 const DEPARTMENT_GRANTS: Record<Department, Permission[]> = {
   chuyen_mon: ["edu.content.create", "edu.content.approve", "edu.forum.moderate", "project.approve"],
-  truyen_thong: ["edu.forum.moderate", "mkt.listing.approve"],
-  su_kien: ["edu.forum.moderate"],
+  truyen_thong: ["edu.forum.moderate", "mkt.listing.approve", "community.moderate"],
+  su_kien: ["edu.forum.moderate", "event.approve"],
 };
 
 const ROLE_GRANTS: Record<Role, Permission[] | "all"> = {
@@ -64,6 +71,9 @@ const ROLE_GRANTS: Record<Role, Permission[] | "all"> = {
     "mkt.seller.approve",
     "project.approve",
     "project.archive_any",
+    "community.moderate",
+    "event.approve",
+    "payments.view",
     "admin.members.view",
   ],
   truong_ban: [],

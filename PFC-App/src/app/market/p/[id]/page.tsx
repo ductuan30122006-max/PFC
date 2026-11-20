@@ -22,7 +22,17 @@ export default async function ListingPage({ params }: { params: Promise<{ id: st
     <>
       <AppHeader back backFallback="/market" title="Chi tiết sản phẩm" />
       <div className="px-4">
-        <ListingThumb category={l.category} size="lg" />
+        {l.images.length > 1 ? (
+          <ul className="no-scrollbar -mx-4 flex snap-x snap-mandatory gap-2 overflow-x-auto px-4" aria-label="Ảnh sản phẩm">
+            {l.images.map((u, i) => (
+              <li key={u} className="w-[85%] shrink-0 snap-center">
+                <ListingThumb category={l.category} size="lg" image={u} alt={`${l.title} — ảnh ${i + 1}/${l.images.length}`} />
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <ListingThumb category={l.category} size="lg" image={l.images[0]} alt={l.title} />
+        )}
         <h1 className="mt-4 text-[20px] leading-tight font-extrabold text-ink">{l.title}</h1>
         <p className="mt-1 text-[24px] font-extrabold text-primary">{l.price === 0 ? "Miễn phí" : formatVnd(l.price)}</p>
         <div className="mt-2 flex flex-wrap gap-2">

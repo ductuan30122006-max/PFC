@@ -3,7 +3,7 @@
 import { Star } from "lucide-react";
 import { useState } from "react";
 import type { OrderAction, PaymentMethod } from "@/modules/market/domain/orders";
-import { orderActionAction, reviewItemAction } from "@/modules/market/server/actions";
+import { orderActionAction, payOrderAction, reviewItemAction } from "@/modules/market/server/actions";
 import { BottomSheet, Button } from "@/ui";
 import { ConfirmSheet } from "@/ui/ConfirmSheet";
 import { FormError, TextArea } from "@/ui/Form";
@@ -106,5 +106,18 @@ export function ReviewButton({ orderId, listingId, title }: { orderId: string; l
         </div>
       </BottomSheet>
     </>
+  );
+}
+
+/** VNPAY order not paid yet: open a new payment (the previous one may have been closed or expired). */
+export function PayOrderButton({ orderId }: { orderId: string }) {
+  const a = useAction();
+  return (
+    <div className="space-y-2">
+      <Button block disabled={a.pending} onClick={() => a.run(() => payOrderAction(orderId), (url) => (window.location.href = url))}>
+        {a.pending ? "Đang chuyển tới VNPAY…" : "Thanh toán qua VNPAY"}
+      </Button>
+      <FormError message={a.error} />
+    </div>
   );
 }

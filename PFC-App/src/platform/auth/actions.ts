@@ -1,12 +1,15 @@
 "use server";
 
 import bcrypt from "bcryptjs";
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { safeAction, type ActionResult } from "@/platform/action-result";
 import { one, run } from "@/platform/db/client";
 import { audit } from "@/platform/audit";
+import { twoFactorStatus, verifySecondFactor } from "@/platform/account/service";
+import { notify } from "@/platform/notifications/service";
+import { CHALLENGE_COOKIE, CHALLENGE_TTL, openChallenge, sealChallenge } from "./challenge";
 import { safeNext } from "./oauth";
 import { passwordSchema } from "./password-policy";
 import * as auth from "./service";
@@ -19,10 +22,45 @@ async function clientIp(): Promise<string> {
 }
 
 /** SYS-02 email + password, with "Ghi nhớ đăng nhập". */
+const cookieBase = () => ({
+  httpOnly: true,
+  sameSite: "lax" as const,
+  secure: process.env.NODE_ENV === "production" && process.env.PFC_INSECURE_COOKIES !== "1",
+  path: "/",
+});
+
 export async function loginAction(input: { email?: unknown; password?: unknown; remember?: unknown }, next?: string): Promise<ActionResult> {
+  let twoStep = false;
   const res = await safeAction(async () => {
     const id = await auth.passwordLogin({ email: input.email, password: input.password }, await clientIp());
-    await startSession(id, { remember: input.remember === true });
+    const remember = input.remember === true;
+    if ((await twoFactorStatus(id)).enabled) {
+      // Not signed in yet: the second step (mockup 268) finishes the login.
+      (await cookies()).set(
+        CHALLENGE_COOKIE,
+        sealChallenge({ sub: id, remember, next: safeNext(next), exp: Math.floor(Date.now() / 1000) + CHALLENGE_TTL }, process.env.PFC_SESSION_SECRET ?? ""),
+        { ...cookieBase(), maxAge: CHALLENGE_TTL },
+      );
+      twoStep = true;
+      return;
+    }
+    await startSession(id, { remember });
+  });
+  if (res.ok) redirect(twoStep ? "/login/2fa" : safeNext(next));
+  return res;
+}
+
+/** Second step of sign-in: 6-digit code from the authenticator app, or a backup code. */
+export async function verifyTwoFactorAction(code: string): Promise<ActionResult> {
+  let next = "/home";
+  const res = await safeAction(async () => {
+    const jar = await cookies();
+    const c = openChallenge(jar.get(CHALLENGE_COOKIE)?.value, process.env.PFC_SESSION_SECRET ?? "", Math.floor(Date.now() / 1000));
+    if (!c) throw new ActionError("Phiên xác thực đã hết hạn. Vui lòng đăng nhập lại.", "expired");
+    if (!(await verifySecondFactor(c.sub, code))) throw new ActionError("Mã không đúng. Nhập mã mới nhất trong ứng dụng xác thực, hoặc một mã dự phòng.", "bad_code");
+    jar.delete(CHALLENGE_COOKIE);
+    await startSession(c.sub, { remember: c.remember });
+    next = c.next;
   });
   if (res.ok) redirect(safeNext(next));
   return res;
@@ -101,6 +139,7 @@ export async function changePasswordAction(input: unknown): Promise<ActionResult
     ]);
     await startSession(me.id, { remember: true });
     await audit(me.id, "member.change_password", `member:${me.id}`, "success");
+    await notify(me.id, { category: "account", title: "Bạn vừa đổi mật khẩu", body: "Các thiết bị khác đã được đăng xuất.", href: "/more/account/devices" });
     return undefined;
   });
 }

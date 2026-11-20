@@ -187,11 +187,11 @@ pfc-app/ (Next.js 15, App Router, một deployable, PWA)
 |---|---|---|
 | **P0 — Chốt** | DEC-M1…M5; xuất token màu/font/radius từ brand kit; danh sách màn hình đợt 1 | ADR-009 "Unified Mobile App Shell" |
 | **P1 — Shell PWA** | Tạo App Shell; design system (TabBar, Header, BottomSheet, FAB, ListItem, AmountInput, Skeleton, Empty/Error/Offline); manifest + icon + SW + trang offline; dark mode | Cài được lên iPhone & Android, mở standalone, Lighthouse PWA pass |
-| **P2 — Identity** | Platform identity: đăng ký/đăng nhập/OTP/quên mật khẩu (SYS-02…06), onboarding (SYS-07, mockup 92–94), một session | Một tài khoản dùng mọi tab — **đã có** đăng ký/đăng nhập + SSO qua gateway sang Club & Opportunity, phân quyền vai trò (ADR-011); còn OTP / quên mật khẩu / onboarding |
+| **P2 — Identity** | Platform identity: đăng ký/đăng nhập/OTP/quên mật khẩu (SYS-02…06), onboarding (SYS-07, mockup 92–94), một session | Một tài khoản dùng mọi tab — **đã có** (ADR-011): đăng ký/đăng nhập, Google/Facebook, quên/đặt lại mật khẩu, xác thực email, 2FA, thiết bị đăng nhập, onboarding, hồ sơ, quyền riêng tư, xuất/xóa dữ liệu, SSO sang Club & Opportunity |
 | **P3 — Finance (entry point)** | Port Flutter → web: FIN-01 Dashboard, FIN-04/05/07 giao dịch, FIN-08 danh mục, FIN-09/10 ngân sách, FIN-13 mục tiêu, FIN-18/19 báo cáo, FIN-20/21 export/import; công cụ tính toán | Luồng "thêm giao dịch trong ≤ 3 chạm" trên điện thoại |
 | **P4 — Gom module** | Chuyển Club → `community/`, Opportunity → `opportunities/` vào shell, giữ nguyên domain/server/test | Bỏ app rời, một bottom nav |
-| **P5 — Push & Home** | Web Push, Notification Center (NOT-01), Home dashboard SYS-08 | Nhận push trên iPhone đã cài PWA |
-| **P6+** | Education, Project, Marketplace, Event, Admin theo SRS roadmap | **Đã có** Education (`/learn`), Marketplace (`/market`), Dự án (`/projects`) + quản trị vai trò (`/more/admin`) — ADR-011. Còn: Event engine, VNPAY, upload ảnh/tệp, thông báo |
+| **P5 — Push & Home** | Web Push, Notification Center (NOT-01), Home dashboard SYS-08 | **Đã có**: Trung tâm thông báo, cài đặt theo kênh, email, Web Push, tìm kiếm toàn app, Home cá nhân hóa (ADR-011). Còn: thử push trên iPhone thật |
+| **P6+** | Education, Project, Marketplace, Event, Admin theo SRS roadmap | **Đã có** Education (`/learn`), Marketplace (`/market`), Dự án (`/projects`) + quản trị vai trò (`/more/admin`) — ADR-011. **Đã có thêm (G3–G5):** Cộng đồng (bài viết, nhóm, tin nhắn, kiểm duyệt), Sự kiện (đăng ký, vé QR, check-in, hủy & hoàn tiền), Thanh toán VNPAY (sandbox), hoàn tiền, chi trả cho người bán. Còn: hợp đồng VNPAY production, ví PFC (cần giấy phép) |
 
 ---
 

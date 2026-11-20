@@ -1,13 +1,25 @@
-import { PrismaClient, OpportunityType, ApplyMode, WorkMode, EmploymentType } from "@prisma/client";
+import { OpportunityType, ApplyMode, WorkMode, EmploymentType } from "@prisma/client";
 import bcrypt from "bcryptjs";
 
-const prisma = new PrismaClient();
+import { createPrismaClient } from "../src/lib/prisma";
+
+// Local file DB, or Turso when TURSO_DATABASE_URL is set (ADR-005).
+const prisma = createPrismaClient();
 
 function hash(plain: string) {
   return bcrypt.hashSync(plain, 12);
 }
 
 async function main() {
+  // This seed WIPES every table first. Never let it run against a remote database by accident.
+  const remote = process.env.TURSO_DATABASE_URL?.trim();
+  if (remote && !remote.startsWith("file:")) {
+    const host = new URL(remote.replace(/^libsql:/, "https:")).host;
+    if (process.env.OPP_SEED_CONFIRM !== `wipe:${host}`) {
+      console.error(`Từ chối: seed sẽ XÓA TOÀN BỘ dữ liệu trên ${host}.\nChỉ dùng cho database demo. Nếu chắc chắn, đặt OPP_SEED_CONFIRM=wipe:${host} rồi chạy lại.`);
+      process.exit(1);
+    }
+  }
   await prisma.oppApplicationEvent.deleteMany();
   await prisma.oppAttachment.deleteMany();
   await prisma.oppDelivery.deleteMany();

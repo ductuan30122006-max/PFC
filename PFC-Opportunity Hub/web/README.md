@@ -20,7 +20,7 @@ Open http://localhost:3000/login — session httpOnly, không đặt cookie memb
 | Provider | provider@pfc.vn | Provider-PFC-2026 |
 | Reviewer | reviewer@pfc.vn | Reviewer-PFC-2026 |
 
-Job expire/remind chỉ POST kèm header `x-cron-secret` (= `CRON_SECRET` trong `.env`). Postgres local: `docker compose up -d` rồi đổi `DATABASE_URL` (xem `.env.example`).
+Job expire/remind: POST kèm header `x-cron-secret`, hoặc `GET /api/jobs/tick` với `Authorization: Bearer <CRON_SECRET>` (Vercel Cron). Production dùng Turso — xem ADR-005 và `PFC-App/DEPLOY.md`.
 
 ## P0 routes
 
@@ -41,7 +41,7 @@ Job expire/remind chỉ POST kèm header `x-cron-secret` (= `CRON_SECRET` trong 
 - `GET /api/me/saves`
 - `GET /api/me/applications`
 
-SQLite local (`prisma/dev.db`) để chạy không cần Neon; production đổi `DATABASE_URL` Postgres.
+SQLite local (`prisma/dev.db`). Production: Turso qua `TURSO_DATABASE_URL` (ADR-005), schema bằng `npm run db:turso:migrate`.
 
 ## P1 / P2 routes
 

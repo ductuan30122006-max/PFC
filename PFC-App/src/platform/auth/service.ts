@@ -8,7 +8,14 @@ import { ActionError } from "@/platform/errors";
 import { publicUrl, sendMail } from "@/platform/mail";
 import { allowAttempt, checkLimit, clearLimit, recordFailure } from "@/platform/rate-limit";
 import { hashOneTimeToken, newOneTimeToken, type SocialProfile } from "./oauth";
+import { POLICY_VERSION } from "@/platform/account/policies";
+import { notify } from "@/platform/notifications/service";
 import { passwordSchema } from "./password-policy";
+
+/** Consent record (Nghị định 13/2023): which terms version was accepted, and when. */
+async function recordTermsConsent(memberId: string, how: string): Promise<void> {
+  await run("INSERT INTO member_consents (id, member_id, kind, granted, version, created_at) VALUES (?, ?, 'terms', 1, ?, ?)", [randomUUID(), memberId, `${POLICY_VERSION}:${how}`, new Date().toISOString()]);
+}
 
 /**
  * Identity & Access use-cases (FR-CORE-001, UC-01, tasks 039–044). Every check happens here,
@@ -57,7 +64,7 @@ export async function passwordLogin(input: unknown, ip: string): Promise<string>
     [kEmail, LOGIN_LIMIT.perEmail],
     [kIp, LOGIN_LIMIT.perIp],
   ] as const) {
-    const c = checkLimit(k, limit);
+    const c = await checkLimit(k, limit);
     if (!c.ok) {
       await audit(null, "member.login", `email:${d.email}`, "failure");
       rateLimited(c.retryAfterSec);
@@ -66,8 +73,8 @@ export async function passwordLogin(input: unknown, ip: string): Promise<string>
   const row = await one<MemberRow>("SELECT id, password_hash, locked, email_verified_at FROM members WHERE email = ?", [d.email]);
   const ok = row && hasPassword(row.password_hash) ? await bcrypt.compare(d.password, row.password_hash) : false;
   if (!row || !ok) {
-    const n = recordFailure(kEmail, LOGIN_LIMIT.windowMs);
-    recordFailure(kIp, LOGIN_LIMIT.windowMs);
+    const n = await recordFailure(kEmail, LOGIN_LIMIT.windowMs);
+    await recordFailure(kIp, LOGIN_LIMIT.windowMs);
     await audit(row?.id ?? null, "member.login", `email:${d.email}`, "failure");
     const left = LOGIN_LIMIT.perEmail - n;
     if (left <= 0) rateLimited(LOGIN_LIMIT.windowMs / 1000);
@@ -84,7 +91,7 @@ export async function passwordLogin(input: unknown, ip: string): Promise<string>
     await audit(row.id, "member.login", `member:${row.id}`, "failure");
     throw new ActionError("Email chưa được xác thực. Mở thư xác thực PFC đã gửi, hoặc gửi lại thư.", "unverified", { email: d.email });
   }
-  clearLimit(kEmail);
+  await clearLimit(kEmail);
   await audit(row.id, "member.login", `member:${row.id}`, "success");
   return row.id;
 }
@@ -101,7 +108,7 @@ const registerSchema = z.object({
 /** SYS-03. Returns whether the member must verify their email before signing in. */
 export async function registerMember(input: unknown, ip: string): Promise<{ id: string; mustVerify: boolean }> {
   const d = registerSchema.parse(input);
-  if (!allowAttempt(`register:${d.email}`, 5, 15 * 60_000) || !allowAttempt(`register-ip:${ip}`, 20, 60 * 60_000)) {
+  if (!(await allowAttempt(`register:${d.email}`, 5, 15 * 60_000)) || !(await allowAttempt(`register-ip:${ip}`, 20, 60 * 60_000))) {
     rateLimited(15 * 60);
   }
   if (await one("SELECT id FROM members WHERE email = ?", [d.email])) throw new ActionError("Email này đã được đăng ký. Hãy đăng nhập.", "exists");
@@ -117,6 +124,7 @@ export async function registerMember(input: unknown, ip: string): Promise<{ id: 
     t,
   ]);
   await audit(id, "member.register", `member:${id}`, "success");
+  await recordTermsConsent(id, "register");
   await issueVerification(id, d.email, d.fullName);
   return { id, mustVerify: verificationRequired() };
 }
@@ -149,7 +157,7 @@ async function issueVerification(memberId: string, email: string, name: string):
 /** "Gửi lại thư xác thực". Always succeeds from the caller's view (no account enumeration). */
 export async function resendVerification(rawEmail: unknown, ip: string): Promise<void> {
   const email = emailSchema.parse(rawEmail);
-  if (!allowAttempt(`verify-mail:${email}`, 3, 15 * 60_000) || !allowAttempt(`verify-mail-ip:${ip}`, 10, 15 * 60_000)) rateLimited(15 * 60);
+  if (!(await allowAttempt(`verify-mail:${email}`, 3, 15 * 60_000)) || !(await allowAttempt(`verify-mail-ip:${ip}`, 10, 15 * 60_000))) rateLimited(15 * 60);
   const m = await one<{ id: string; full_name: string; email_verified_at: string | null; locked: number }>(
     "SELECT id, full_name, email_verified_at, locked FROM members WHERE email = ?",
     [email],
@@ -201,7 +209,7 @@ export async function verifyEmail(token: unknown): Promise<void> {
 /** Same response whether or not the email has an account. */
 export async function requestPasswordReset(rawEmail: unknown, ip: string): Promise<void> {
   const email = z.string().trim().min(1, "Vui lòng nhập email.").pipe(emailSchema).parse(rawEmail);
-  if (!allowAttempt(`reset:${email}`, 3, 60 * 60_000) || !allowAttempt(`reset-ip:${ip}`, 10, 60 * 60_000)) rateLimited(60 * 60);
+  if (!(await allowAttempt(`reset:${email}`, 3, 60 * 60_000)) || !(await allowAttempt(`reset-ip:${ip}`, 10, 60 * 60_000))) rateLimited(60 * 60);
   const m = await one<{ id: string; full_name: string; locked: number }>("SELECT id, full_name, locked FROM members WHERE email = ?", [email]);
   if (!m || Number(m.locked) === 1) {
     await audit(m?.id ?? null, "member.reset_request", `email:${email}`, "failure");
@@ -238,8 +246,9 @@ export async function resetPassword(input: unknown): Promise<void> {
   );
   await run("UPDATE auth_tokens SET used_at = ? WHERE member_id = ? AND purpose = 'reset' AND used_at IS NULL", [t, c.memberId]);
   const email = await one<{ email: string }>("SELECT email FROM members WHERE id = ?", [c.memberId]);
-  if (email) clearLimit(`login:${email.email}`);
+  if (email) await clearLimit(`login:${email.email}`);
   await audit(c.memberId, "member.reset_password", `member:${c.memberId}`, "success");
+  await notify(c.memberId, { category: "account", title: "Mật khẩu của bạn vừa được đặt lại", body: "Mọi thiết bị đã được đăng xuất. Không phải bạn? Liên hệ Chủ nhiệm PFC ngay.", href: "/more/account/devices" });
 }
 
 // ───────────────────────── Social sign-in ─────────────────────────
@@ -272,6 +281,7 @@ export async function socialSignIn(p: SocialProfile): Promise<string> {
         [memberId, p.email, p.name, NO_PASSWORD, ownerRole(p.email), p.emailVerified ? t : null, t, t],
       );
       await audit(memberId, "member.register", `member:${memberId}/${p.provider}`, "success");
+      await recordTermsConsent(memberId, p.provider);
     }
     await run("INSERT INTO member_identities (provider, subject, member_id, email, created_at) VALUES (?, ?, ?, ?, ?)", [p.provider, p.subject, memberId, p.email, now()]);
   }

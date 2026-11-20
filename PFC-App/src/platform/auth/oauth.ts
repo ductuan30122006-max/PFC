@@ -53,7 +53,8 @@ export function authorizeUrl(p: Provider, cfg: ProviderConfig, state: string, co
 
 // ───────────── State cookie (CSRF + PKCE verifier + where to go back) ─────────────
 
-export type OAuthState = { p: Provider; state: string; verifier: string; next: string; remember: boolean; exp: number };
+/** link: id of the signed-in member who is linking this provider (mockup 273), instead of signing in. */
+export type OAuthState = { p: Provider; state: string; verifier: string; next: string; remember: boolean; exp: number; link?: string };
 export const OAUTH_COOKIE = "pfc_oauth";
 export const OAUTH_STATE_TTL = 600;
 

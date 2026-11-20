@@ -1,4 +1,6 @@
 import "server-only";
+import { notify } from "@/platform/notifications/service";
+import { PAYMENT_TTL_MIN, autoRefund, createPayment, onlinePaymentEnabled } from "@/modules/payments/server/service";
 import { randomBytes, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { all, one, run, withTransaction } from "@/platform/db/client";
@@ -7,6 +9,7 @@ import { ActionError } from "@/platform/errors";
 import { can, type Actor } from "@/platform/roles";
 import { applyWorkflow, canEditContent, canViewContent, isContentStatus, type ContentStatus, type WorkflowAction } from "@/platform/workflow";
 import { MAX_AMOUNT_VND } from "@/lib/money";
+import { verifyOwnUploadUrls } from "@/platform/uploads/service";
 import {
   CATEGORIES,
   applyOrderAction,
@@ -20,6 +23,7 @@ import {
   type OrderAction,
   type OrderStatus,
   type PaymentMethod,
+  type PaymentStatus,
 } from "../domain/orders";
 
 /** Marketplace use-cases (FR-MKT). Actor-based; every permission is checked here. */
@@ -85,6 +89,8 @@ export async function decideSeller(actor: Actor, memberId: string, decision: "ap
   await run("UPDATE mkt_sellers SET status = ?, reject_reason = ?, updated_at = ? WHERE member_id = ?", [to, reason?.trim() || null, now(), memberId]);
   if (decision === "suspend") await run("UPDATE mkt_listings SET status = 'archived', updated_at = ? WHERE seller_id = ? AND status = 'published'", [now(), memberId]);
   await audit(actor.id, `mkt.seller.${decision}`, `seller:${memberId}`, "success");
+  const msg = { approve: "Cửa hàng của bạn đã được duyệt — bắt đầu đăng tin", reject: "Hồ sơ người bán bị từ chối", suspend: "Cửa hàng của bạn bị tạm ngưng", reinstate: "Cửa hàng của bạn hoạt động trở lại" }[decision];
+  await notify(memberId, { category: "market", title: msg, body: reason?.trim() ? `Lý do: ${reason.trim().slice(0, 200)}` : "", href: "/market/sell" });
 }
 
 // ───────────────────────── Listings ─────────────────────────
@@ -105,7 +111,20 @@ export type Listing = {
   rating: number | null;
   reviewCount: number;
   sold: number;
+  /** Server-processed photo URLs; the first is the cover. */
+  images: string[];
 };
+
+export const MAX_LISTING_IMAGES = 6;
+
+function parseImages(raw: unknown): string[] {
+  try {
+    const v = JSON.parse(typeof raw === "string" ? raw : "[]");
+    return Array.isArray(v) ? v.filter((u): u is string => typeof u === "string" && (u.startsWith("/api/files/") || u.startsWith("https://"))) : [];
+  } catch {
+    return [];
+  }
+}
 
 const LISTING_SQL = `SELECT l.*, COALESCE(s.shop_name, m.full_name) AS shop_name,
   (SELECT AVG(rating) FROM mkt_reviews r WHERE r.listing_id = l.id) AS rating,
@@ -129,6 +148,7 @@ type ListingRow = {
   rating: number | null;
   review_count: number;
   sold: number;
+  images: string;
 };
 const toListing = (r: ListingRow): Listing => ({
   id: r.id,
@@ -146,6 +166,7 @@ const toListing = (r: ListingRow): Listing => ({
   rating: r.rating === null ? null : Math.round(Number(r.rating) * 10) / 10,
   reviewCount: Number(r.review_count),
   sold: Number(r.sold),
+  images: parseImages(r.images),
 });
 
 export async function listPublished(f: { q?: string; category?: string; kind?: string; sellerId?: string; sort?: string } = {}): Promise<Listing[]> {
@@ -188,6 +209,7 @@ const listingSchema = z
     price: z.coerce.number().int("Giá phải là số nguyên.").min(0, "Giá không âm.").max(MAX_AMOUNT_VND),
     stock: z.union([z.coerce.number().int().min(0).max(100000), z.null()]).default(null),
     delivery: z.enum(["ship", "pickup", "online"]),
+    images: z.array(z.string()).max(MAX_LISTING_IMAGES, `Tối đa ${MAX_LISTING_IMAGES} ảnh.`).default([]),
   })
   .superRefine((v, ctx) => {
     if ((v.kind === "digital" || v.kind === "course") && v.delivery !== "online") ctx.addIssue({ code: "custom", message: "Sản phẩm số / khóa học phải giao trực tuyến." });
@@ -201,10 +223,11 @@ async function requireApprovedSeller(actor: Actor) {
 export async function createListing(actor: Actor, input: unknown): Promise<string> {
   await requireApprovedSeller(actor);
   const d = listingSchema.parse(input);
+  const images = await verifyOwnUploadUrls(actor, "listing", d.images, MAX_LISTING_IMAGES);
   const id = randomUUID();
   await run(
-    "INSERT INTO mkt_listings (id, seller_id, kind, category, title, description, price, stock, delivery, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    [id, actor.id, d.kind, d.category, d.title, d.description, d.price, d.stock, d.delivery, now(), now()],
+    "INSERT INTO mkt_listings (id, seller_id, kind, category, title, description, price, stock, delivery, images, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    [id, actor.id, d.kind, d.category, d.title, d.description, d.price, d.stock, d.delivery, JSON.stringify(images), now(), now()],
   );
   return id;
 }
@@ -219,8 +242,9 @@ export async function updateListing(actor: Actor, id: string, input: unknown): P
   if (status === "submitted") throw new ActionError("Tin đang chờ duyệt, chưa sửa được.");
   await requireApprovedSeller(actor);
   const d = listingSchema.parse(input);
+  const images = await verifyOwnUploadUrls(actor, "listing", d.images, MAX_LISTING_IMAGES);
   const next: ContentStatus = status === "rejected" ? "draft" : status === "published" ? (can(actor, "mkt.listing.approve") ? "published" : "submitted") : status;
-  await run("UPDATE mkt_listings SET kind = ?, category = ?, title = ?, description = ?, price = ?, stock = ?, delivery = ?, status = ?, updated_at = ? WHERE id = ?", [
+  await run("UPDATE mkt_listings SET kind = ?, category = ?, title = ?, description = ?, price = ?, stock = ?, delivery = ?, images = ?, status = ?, updated_at = ? WHERE id = ?", [
     d.kind,
     d.category,
     d.title,
@@ -228,6 +252,7 @@ export async function updateListing(actor: Actor, id: string, input: unknown): P
     d.price,
     d.stock,
     d.delivery,
+    JSON.stringify(images),
     next,
     now(),
     id,
@@ -243,6 +268,10 @@ export async function listingTransition(actor: Actor, id: string, action: Workfl
   if (!res.ok) throw new ActionError(res.error);
   await run("UPDATE mkt_listings SET status = ?, reject_reason = ?, updated_at = ? WHERE id = ?", [res.to, res.to === "rejected" ? reason!.trim().slice(0, 500) : null, now(), id]);
   await audit(actor.id, `mkt.listing.${action}`, `listing:${id}`, "success");
+  if (r.seller_id !== actor.id && (res.to === "published" || res.to === "rejected" || res.to === "archived")) {
+    const verb = res.to === "published" ? "đã được duyệt và đang bán" : res.to === "rejected" ? "bị từ chối" : "đã bị gỡ";
+    await notify(r.seller_id, { category: "market", title: `Tin đăng của bạn ${verb}`, body: res.to === "rejected" ? `Lý do: ${reason!.trim().slice(0, 200)}` : "", href: `/market/sell/listings/${id}` });
+  }
   return res.to;
 }
 
@@ -332,7 +361,7 @@ export async function cartCount(actor: Actor): Promise<number> {
 }
 
 const checkoutSchema = z.object({
-  paymentMethod: z.enum(["cod", "bank_transfer", "in_person"]),
+  paymentMethod: z.enum(["cod", "bank_transfer", "in_person", "vnpay"]),
   recipientName: z.string().trim().min(2, "Nhập tên người nhận.").max(80),
   recipientPhone: z.string().trim().regex(/^(\+84|0)\d{9,10}$/, "Số điện thoại không hợp lệ."),
   address: z.string().trim().max(300).default(""),
@@ -353,16 +382,18 @@ export async function checkout(actor: Actor, input: unknown): Promise<string[]> 
   if (cart.problems.length) throw new ActionError(cart.problems[0]);
   if (cart.needsAddress && d.address.length < 10) throw new ActionError("Nhập địa chỉ giao hàng đầy đủ.");
   if (d.paymentMethod === "cod" && !cart.needsAddress) throw new ActionError("COD chỉ dùng cho đơn giao hàng.");
+  if (d.paymentMethod === "vnpay" && !onlinePaymentEnabled()) throw new ActionError("Thanh toán trực tuyến chưa được bật. Chọn cách thanh toán khác.");
+  const dueAt = d.paymentMethod === "vnpay" ? new Date(Date.now() + PAYMENT_TTL_MIN * 60_000).toISOString() : null;
 
-  return withTransaction(async (t) => {
+  const placed = await withTransaction(async (t) => {
     const ids: string[] = [];
     for (const g of cart.groups) {
       const id = randomUUID();
       const code = orderCode(new Date(), randomBytes(4).toString("hex"));
       await t.execute(
-        `INSERT INTO mkt_orders (id, code, buyer_id, seller_id, status, payment_method, total, recipient_name, recipient_phone, address, note, checkout_key, created_at, updated_at)
-         VALUES (?, ?, ?, ?, 'placed', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [id, code, actor.id, g.sellerId, d.paymentMethod, g.total, d.recipientName, d.recipientPhone, d.address, d.note, d.checkoutKey, now(), now()],
+        `INSERT INTO mkt_orders (id, code, buyer_id, seller_id, status, payment_method, total, recipient_name, recipient_phone, address, note, checkout_key, payment_due_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'placed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [id, code, actor.id, g.sellerId, d.paymentMethod, g.total, d.recipientName, d.recipientPhone, d.address, d.note, d.checkoutKey, dueAt, now(), now()],
       );
       for (const item of g.items) {
         const dec = await t.execute(
@@ -378,14 +409,21 @@ export async function checkout(actor: Actor, input: unknown): Promise<string[]> 
     await t.execute("DELETE FROM mkt_cart_items WHERE member_id = ?", [actor.id]);
     return ids;
   });
+  // After commit: each seller hears about their new order (VNPAY orders only once they are paid).
+  if (d.paymentMethod === "vnpay") return placed;
+  for (const id of placed) {
+    const o = await one<{ seller_id: string; code: string }>("SELECT seller_id, code FROM mkt_orders WHERE id = ?", [id]);
+    if (o) await notify(o.seller_id, { category: "market", title: `Đơn hàng mới #${o.code}`, body: "Vào Đơn bán để xác nhận đơn.", href: `/market/orders/${id}` });
+  }
+  return placed;
 }
 
 // ───────────────────────── Orders ─────────────────────────
 
-export type OrderSummary = { id: string; code: string; status: OrderStatus; total: number; createdAt: string; counterpart: string; itemCount: number; firstTitle: string; paymentMethod: PaymentMethod; paymentStatus: "unpaid" | "paid" };
+export type OrderSummary = { id: string; code: string; status: OrderStatus; total: number; createdAt: string; counterpart: string; itemCount: number; firstTitle: string; paymentMethod: PaymentMethod; paymentStatus: PaymentStatus };
 
 async function listOrders(where: string, args: string[], counterpartJoin: "buyer" | "seller"): Promise<OrderSummary[]> {
-  const rows = await all<{ id: string; code: string; status: OrderStatus; total: number; created_at: string; counterpart: string; item_count: number; first_title: string; payment_method: PaymentMethod; payment_status: "unpaid" | "paid" }>(
+  const rows = await all<{ id: string; code: string; status: OrderStatus; total: number; created_at: string; counterpart: string; item_count: number; first_title: string; payment_method: PaymentMethod; payment_status: PaymentStatus }>(
     `SELECT o.id, o.code, o.status, o.total, o.created_at, o.payment_method, o.payment_status,
        ${counterpartJoin === "seller" ? "COALESCE(s.shop_name, m.full_name)" : "m.full_name"} AS counterpart,
        (SELECT SUM(qty) FROM mkt_order_items i WHERE i.order_id = o.id) AS item_count,
@@ -420,7 +458,7 @@ export async function getOrder(actor: Actor, id: string) {
     seller_id: string;
     status: OrderStatus;
     payment_method: PaymentMethod;
-    payment_status: "unpaid" | "paid";
+    payment_status: PaymentStatus;
     total: number;
     recipient_name: string;
     recipient_phone: string;
@@ -470,7 +508,7 @@ export async function getOrder(actor: Actor, id: string) {
 }
 
 export async function orderAction(actor: Actor, orderId: string, action: OrderAction, reason?: string): Promise<OrderStatus> {
-  const o = await one<{ buyer_id: string; seller_id: string; status: OrderStatus; payment_method: PaymentMethod; payment_status: "unpaid" | "paid" }>(
+  const o = await one<{ buyer_id: string; seller_id: string; status: OrderStatus; payment_method: PaymentMethod; payment_status: PaymentStatus }>(
     "SELECT buyer_id, seller_id, status, payment_method, payment_status FROM mkt_orders WHERE id = ?",
     [orderId],
   );
@@ -489,7 +527,7 @@ export async function orderAction(actor: Actor, orderId: string, action: OrderAc
       o.status,
     ]);
     if (upd.rowsAffected === 0) throw new ActionError("Đơn vừa được cập nhật bởi người khác. Tải lại và thử lại.");
-    if (action === "cancel") {
+    if (action === "cancel" && !(o.payment_method === "vnpay" && o.payment_status === "unpaid")) {
       const items = await t.execute("SELECT listing_id, qty FROM mkt_order_items WHERE order_id = ?", [orderId]);
       for (const i of items.rows) await t.execute("UPDATE mkt_listings SET stock = stock + ? WHERE id = ? AND stock IS NOT NULL", [Number(i.qty), String(i.listing_id)]);
     }
@@ -504,6 +542,22 @@ export async function orderAction(actor: Actor, orderId: string, action: OrderAc
     ]);
   });
   await audit(actor.id, `mkt.order.${action}`, `order:${orderId}`, "success");
+  if (action === "cancel" && o.payment_method === "vnpay") {
+    if (o.payment_status === "paid") await autoRefund("mkt_order", orderId, "order_cancelled", actor.id);
+    else await releaseUnpaidVnpay(orderId); // payment never finished: give stock back now
+  }
+  // The other party is told what changed.
+  const other = actor.id === o.buyer_id ? o.seller_id : o.buyer_id;
+  const code = (await one<{ code: string }>("SELECT code FROM mkt_orders WHERE id = ?", [orderId]))?.code ?? "";
+  const text: Record<OrderAction, string> = {
+    confirm: "đã được người bán xác nhận",
+    mark_paid: "đã được xác nhận thanh toán",
+    ship: "đang được giao",
+    deliver: "đã giao — bấm “Đã nhận hàng” khi bạn nhận đủ",
+    complete: "đã hoàn tất",
+    cancel: "đã bị hủy",
+  };
+  await notify(other, { category: "market", title: `Đơn #${code} ${text[action]}`, body: action === "cancel" && reason?.trim() ? `Lý do: ${reason.trim().slice(0, 200)}` : "", href: `/market/orders/${orderId}` });
   return res.status;
 }
 
@@ -546,4 +600,55 @@ export async function sellerStats(actor: Actor) {
     listings: Number(r?.listings ?? 0),
     rating: r?.rating === null || r?.rating === undefined ? null : averageRating([Number(r.rating)]),
   };
+}
+
+/** PAY-01 for Marketplace: one VNPAY payment for the buyer's unpaid VNPAY orders (one per seller). */
+export async function startOrderPayment(actor: Actor, orderIds: string[], ipAddr: string): Promise<{ payUrl: string; paymentId: string }> {
+  if (!orderIds.length) throw new ActionError("Không có đơn cần thanh toán.");
+  const rows = await all<{ id: string; seller_id: string; total: number; code: string; status: OrderStatus; payment_status: PaymentStatus; payment_method: PaymentMethod }>(
+    `SELECT id, seller_id, total, code, status, payment_status, payment_method FROM mkt_orders WHERE buyer_id = ? AND id IN (${orderIds.map(() => "?").join(",")})`,
+    [actor.id, ...orderIds],
+  );
+  const due = rows.filter((r) => r.payment_method === "vnpay" && r.payment_status === "unpaid" && r.status === "placed");
+  if (due.length !== orderIds.length) throw new ActionError("Đơn không còn chờ thanh toán.");
+  const newDue = new Date(Date.now() + PAYMENT_TTL_MIN * 60_000).toISOString();
+  for (const r of due) await run("UPDATE mkt_orders SET payment_due_at = ?, updated_at = ? WHERE id = ?", [newDue, now(), r.id]);
+  const pay = await createPayment(actor.id, {
+    purpose: "mkt_checkout",
+    description: `Đơn hàng ${due.map((r) => "#" + r.code).join(", ")}`.slice(0, 180),
+    returnPath: due.length === 1 ? `/market/orders/${due[0].id}` : "/market/orders",
+    items: due.map((r) => ({ refType: "mkt_order" as const, refId: r.id, payeeId: r.seller_id, amount: Number(r.total) })),
+    ipAddr,
+  });
+  return { payUrl: pay.payUrl, paymentId: pay.id };
+}
+
+/** An unpaid VNPAY order that is cancelled or expires gives its stock back (idempotent via the event log). */
+export async function releaseUnpaidVnpay(orderId: string): Promise<void> {
+  const already = await one("SELECT 1 AS x FROM mkt_order_events WHERE order_id = ? AND to_status = 'stock_released'", [orderId]);
+  if (already) return;
+  await withTransaction(async (t) => {
+    const items = await t.execute("SELECT listing_id, qty FROM mkt_order_items WHERE order_id = ?", [orderId]);
+    for (const i of items.rows) await t.execute("UPDATE mkt_listings SET stock = stock + ? WHERE id = ? AND stock IS NOT NULL", [Number(i.qty), String(i.listing_id)]);
+    await t.execute("INSERT INTO mkt_order_events (id, order_id, actor_id, from_status, to_status, note, created_at) VALUES (?, ?, 'system', NULL, 'stock_released', NULL, ?)", [randomUUID(), orderId, now()]);
+  });
+}
+
+/** Job: VNPAY orders never paid (no payment started, or the page was abandoned) are cancelled after their deadline. */
+export async function expireUnpaidOrders(): Promise<number> {
+  const cutoff = new Date(Date.now() - 5 * 60_000).toISOString();
+  const rows = await all<{ id: string }>(
+    `SELECT o.id FROM mkt_orders o WHERE o.payment_method = 'vnpay' AND o.payment_status = 'unpaid' AND o.status = 'placed' AND o.payment_due_at < ?
+       AND NOT EXISTS (SELECT 1 FROM payment_items i JOIN payments p ON p.id = i.payment_id WHERE i.ref_type = 'mkt_order' AND i.ref_id = o.id AND p.status = 'pending')`,
+    [cutoff],
+  );
+  let n = 0;
+  for (const r of rows) {
+    const c = await run("UPDATE mkt_orders SET status = 'cancelled', cancel_reason = 'Chưa thanh toán trực tuyến', updated_at = ? WHERE id = ? AND status = 'placed' AND payment_status = 'unpaid'", [now(), r.id]);
+    if (c !== 1) continue;
+    await run("INSERT INTO mkt_order_events (id, order_id, actor_id, from_status, to_status, note, created_at) VALUES (?, ?, 'system', 'placed', 'cancelled', 'Hết hạn thanh toán', ?)", [randomUUID(), r.id, now()]);
+    await releaseUnpaidVnpay(r.id);
+    n += 1;
+  }
+  return n;
 }

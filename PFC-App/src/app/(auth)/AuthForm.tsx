@@ -73,6 +73,19 @@ export function AuthForm({
 
       <div className="mt-5">
         <SocialButtons providers={providers} next={next} remember={remember} register={register} />
+        {register && (
+          <p className="mt-2 text-center text-[12px] text-muted">
+            Đăng ký bằng Google/Facebook nghĩa là bạn đồng ý{" "}
+            <Link href="/more/policies/terms" className="font-semibold text-primary">
+              Điều khoản
+            </Link>{" "}
+            và{" "}
+            <Link href="/more/policies/privacy" className="font-semibold text-primary">
+              Chính sách quyền riêng tư
+            </Link>
+            .
+          </p>
+        )}
       </div>
       <div className="my-5 flex items-center gap-3 text-[13px] text-muted" aria-hidden="true">
         <span className="h-px flex-1 bg-line" /> hoặc dùng email <span className="h-px flex-1 bg-line" />
@@ -273,7 +286,17 @@ function RegisterForm({ next }: { next?: string }) {
         </ul>
         <label className="flex items-start gap-3 text-[14px] text-ink-2">
           <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} className="mt-0.5 size-5 shrink-0 accent-[var(--pfc-primary)]" />
-          <span>Tôi đồng ý với Điều khoản sử dụng và Chính sách bảo mật của PFC.</span>
+          <span>
+            Tôi đồng ý với{" "}
+            <Link href="/more/policies/terms" target="_blank" className="font-semibold text-primary">
+              Điều khoản sử dụng
+            </Link>{" "}
+            và{" "}
+            <Link href="/more/policies/privacy" target="_blank" className="font-semibold text-primary">
+              Chính sách quyền riêng tư
+            </Link>{" "}
+            của PFC.
+          </span>
         </label>
       </fieldset>
       {failure?.code === "exists" ? (

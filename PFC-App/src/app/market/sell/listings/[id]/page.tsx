@@ -28,6 +28,7 @@ export default async function EditListingPage({ params }: { params: Promise<{ id
           stock: String(l.stock ?? 0),
           unlimited: l.stock === null,
           delivery: l.delivery,
+          images: l.images,
         }}
       />
     </>

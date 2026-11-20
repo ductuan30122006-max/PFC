@@ -8,7 +8,7 @@
  *
  * Bump VERSION whenever this file's caching rules or the precache list change.
  */
-const VERSION = "v3";
+const VERSION = "v4";
 const SHELL_CACHE = `pfc-shell-${VERSION}`;
 const ASSET_CACHE = `pfc-assets-${VERSION}`;
 const OFFLINE_URL = "/offline.html";
@@ -48,6 +48,48 @@ self.addEventListener("message", (event) => {
   if (type === "CLEAR_CACHES") {
     event.waitUntil(caches.keys().then((names) => Promise.all(names.map((n) => caches.delete(n)))));
   }
+});
+
+/*
+ * Web Push (NOT-05). The payload is only { title, body, href } from our server.
+ * Clicking focuses an open PFC tab or opens one — only same-site paths are followed.
+ */
+self.addEventListener("push", (event) => {
+  let data = { title: "PFC", body: "", href: "/notifications" };
+  try {
+    if (event.data) data = { ...data, ...event.data.json() };
+  } catch {
+    /* non-JSON payload: show the default */
+  }
+  const href = typeof data.href === "string" && data.href.startsWith("/") && !data.href.startsWith("//") ? data.href : "/notifications";
+  event.waitUntil(
+    self.registration.showNotification(String(data.title).slice(0, 120), {
+      body: String(data.body ?? "").slice(0, 300),
+      icon: "/icons/icon-192.png",
+      badge: "/icons/icon-192.png",
+      data: { href },
+      lang: "vi",
+    }),
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const href = (event.notification.data && event.notification.data.href) || "/notifications";
+  const target = new URL(href, self.location.origin).href;
+  event.waitUntil(
+    (async () => {
+      const wins = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      for (const w of wins) {
+        if (new URL(w.url).origin === self.location.origin && "focus" in w) {
+          await w.focus();
+          if ("navigate" in w) return w.navigate(target);
+          return;
+        }
+      }
+      return self.clients.openWindow(target);
+    })(),
+  );
 });
 
 function isHashedAsset(url) {

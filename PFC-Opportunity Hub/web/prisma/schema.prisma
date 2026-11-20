@@ -278,3 +278,10 @@ enum ApplicationStatus {
   REDIRECTED
   CLOSED
 }
+
+/// CV bytes when OPP_FILE_STORAGE=db (serverless: no persistent disk). Keyed by OppAttachment.storageKey; never exposed directly.
+model OppFileBlob {
+  storageKey String   @id
+  bytes      Bytes
+  createdAt  DateTime @default(now())
+}

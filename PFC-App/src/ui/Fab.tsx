@@ -17,3 +17,14 @@ export function Fab({ label, onClick }: { label: string; onClick: () => void }) 
     </div>
   );
 }
+
+/** Same floating "+" as a link (server pages: "Viết bài", "Tạo sự kiện"…). */
+export function FabLink({ label, href }: { label: string; href: string }) {
+  return (
+    <div className="fixed-in-canvas pointer-events-none bottom-[calc(var(--tabbar-h)+var(--safe-bottom)+16px)] z-30 flex justify-end px-4">
+      <a href={href} aria-label={label} className="pressable pointer-events-auto grid size-14 place-items-center rounded-full bg-primary text-on-primary shadow-sheet">
+        <Plus size={28} strokeWidth={2.4} />
+      </a>
+    </div>
+  );
+}

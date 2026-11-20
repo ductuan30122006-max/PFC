@@ -1,4 +1,5 @@
 import "server-only";
+import { notify } from "@/platform/notifications/service";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { all, one, run } from "@/platform/db/client";
@@ -61,6 +62,11 @@ async function requireProject(id: string): Promise<Row & { status: ProjectStatus
   const p = await projectRow(id);
   if (!p || !isProjectStatus(p.status)) throw new ActionError("Không tìm thấy dự án.");
   return p as Row & { status: ProjectStatus };
+}
+
+/** Owner + leads of a project (who handle join requests). */
+async function admins(projectId: string): Promise<string[]> {
+  return (await all<{ member_id: string }>("SELECT member_id FROM prj_members WHERE project_id = ? AND status = 'active' AND role IN ('owner','lead')", [projectId])).map((r) => r.member_id);
 }
 
 async function membership(projectId: string, memberId: string): Promise<{ role: MemberRole; status: MemberStatus } | null> {
@@ -185,6 +191,10 @@ export async function projectTransition(actor: Actor, id: string, action: Projec
   );
   if (res !== 1) throw new ActionError("Dự án vừa được người khác cập nhật. Tải lại trang.");
   await audit(actor.id, `project.${action}`, `project:${id}`, "success");
+  if (p.owner_id !== actor.id && (r.to === "active" || r.to === "rejected" || r.to === "archived")) {
+    const verb = r.to === "active" ? (action === "restore" ? "đã được khôi phục" : "đã được duyệt và công khai") : r.to === "rejected" ? "bị từ chối" : "đã bị lưu trữ";
+    await notify(p.owner_id, { category: "projects", title: `Dự án “${p.title.slice(0, 60)}” ${verb}`, body: r.to === "rejected" ? `Lý do: ${reason!.trim().slice(0, 200)}` : "", href: `/projects/p/${id}` });
+  }
   return r.to;
 }
 
@@ -334,6 +344,7 @@ export async function requestToJoin(actor: Actor, projectId: string, input: unkn
      ON CONFLICT (project_id, member_id) DO UPDATE SET role = excluded.role, status = 'requested', message = excluded.message, updated_at = excluded.updated_at`,
     [projectId, actor.id, d.role, d.message, t, t],
   );
+  await notify(await admins(projectId), { category: "projects", title: d.role === "mentor" ? "Có người đề nghị làm mentor" : "Có yêu cầu tham gia dự án", body: p.title.slice(0, 120), href: `/projects/p/${projectId}/workspace?tab=team` });
 }
 
 export async function cancelRequest(actor: Actor, projectId: string): Promise<void> {
@@ -356,6 +367,7 @@ export async function decideRequest(actor: Actor, projectId: string, memberId: s
     memberId,
   ]);
   await audit(actor.id, accept ? "project.member.accept" : "project.member.decline", `project:${projectId}/member:${memberId}`, "success");
+  await notify(memberId, { category: "projects", title: accept ? `Bạn đã được nhận vào dự án “${p.title.slice(0, 60)}”` : `Yêu cầu tham gia “${p.title.slice(0, 60)}” chưa được nhận`, href: `/projects/p/${projectId}` });
 }
 
 const inviteSchema = z.object({
@@ -371,7 +383,11 @@ export async function inviteMember(actor: Actor, projectId: string, input: unkno
   if (p.status !== "active" && p.status !== "draft") throw new ActionError("Không mời được thành viên ở trạng thái này.");
   const myRole = await activeRole(projectId, actor.id);
   if (!canInviteAs(myRole, d.role, manageAny(actor))) throw new ActionError(myRole === "lead" ? "Trưởng nhóm chỉ mời được thành viên." : "Bạn không có quyền mời.");
-  const target = await one<{ id: string }>("SELECT id FROM members WHERE email = ? AND locked = 0", [d.email]);
+  // Privacy setting (mockup 272) "Cho phép tìm thấy qua email": opted-out members cannot be found this way.
+  const target = await one<{ id: string }>(
+    "SELECT id FROM members WHERE email = ? AND locked = 0 AND deleted_at IS NULL AND COALESCE(json_extract(privacy, '$.findByEmail'), 1) = 1",
+    [d.email],
+  );
   if (!target) throw new ActionError("Không có tài khoản PFC với email này.");
   const m = await membership(projectId, target.id);
   if (m?.status === "active") throw new ActionError("Người này đã ở trong dự án.");
@@ -382,6 +398,7 @@ export async function inviteMember(actor: Actor, projectId: string, input: unkno
     [projectId, target.id, d.role, d.scope, actor.id, t, t],
   );
   await audit(actor.id, "project.member.invite", `project:${projectId}/member:${target.id}`, "success");
+  await notify(target.id, { category: "projects", title: `Bạn được mời tham gia dự án “${p.title.slice(0, 60)}”`, href: `/projects/p/${projectId}` });
 }
 
 export async function respondInvite(actor: Actor, projectId: string, accept: boolean): Promise<void> {
@@ -402,6 +419,8 @@ export async function removeMember(actor: Actor, projectId: string, memberId: st
   await run("UPDATE prj_members SET status = 'removed', updated_at = ? WHERE project_id = ? AND member_id = ?", [now(), projectId, memberId]);
   await run("UPDATE prj_tasks SET assignee_id = NULL, updated_at = ? WHERE project_id = ? AND assignee_id = ? AND status NOT IN ('done','cancelled')", [now(), projectId, memberId]);
   await audit(actor.id, "project.member.remove", `project:${projectId}/member:${memberId}`, "success");
+  const pr = await projectRow(projectId);
+  await notify(memberId, { category: "projects", title: `Bạn không còn là thành viên dự án “${(pr?.title ?? "").slice(0, 60)}”`, href: "/projects/mine" });
 }
 
 export async function leaveProject(actor: Actor, projectId: string): Promise<void> {
@@ -496,6 +515,9 @@ export async function createTask(actor: Actor, projectId: string, input: unknown
     "INSERT INTO prj_tasks (id, project_id, title, description, status, assignee_id, due_date, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     [id, projectId, d.title, d.description, d.status, d.assigneeId, d.dueDate, actor.id, now(), now()],
   );
+  if (d.assigneeId && d.assigneeId !== actor.id) {
+    await notify(d.assigneeId, { category: "projects", title: `Bạn được giao việc: ${d.title.slice(0, 80)}`, body: p.title.slice(0, 120), href: `/projects/p/${projectId}/workspace` });
+  }
   return id;
 }
 
@@ -517,6 +539,9 @@ export async function updateTask(actor: Actor, taskId: string, input: unknown): 
     now(),
     taskId,
   ]);
+  if (d.assigneeId && d.assigneeId !== t.assignee_id && d.assigneeId !== actor.id) {
+    await notify(d.assigneeId, { category: "projects", title: `Bạn được giao việc: ${d.title.slice(0, 80)}`, body: p.title.slice(0, 120), href: `/projects/p/${t.project_id}/workspace` });
+  }
 }
 
 export async function deleteTask(actor: Actor, taskId: string): Promise<void> {
@@ -605,6 +630,7 @@ export async function giveFeedback(actor: Actor, projectId: string, input: unkno
      ON CONFLICT (project_id, author_id) DO UPDATE SET rating = excluded.rating, comment = excluded.comment, updated_at = excluded.updated_at`,
     [randomUUID(), projectId, actor.id, d.rating, d.comment, t, t],
   );
+  await notify(p.owner_id, { category: "projects", title: `Dự án “${p.title.slice(0, 60)}” nhận đánh giá ${d.rating}★`, body: d.comment.slice(0, 200), href: `/projects/p/${projectId}`, dedupeKey: `feedback:${projectId}:${actor.id}:${t}` });
 }
 
 /** Moderation (FR-PROJ-005 "có moderation"): approvers / Chủ nhiệm hide or unhide feedback. Owners cannot hide criticism. */

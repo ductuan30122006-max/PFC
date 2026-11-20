@@ -6,17 +6,18 @@ import { CATEGORIES } from "@/modules/market/domain/orders";
 import { createListingAction, deleteListingAction, listingTransitionAction, updateListingAction } from "@/modules/market/server/actions";
 import type { ContentStatus } from "@/platform/workflow";
 import { AmountInput, Button, Section } from "@/ui";
+import { ImageUploader } from "@/ui/ImageUploader";
 import { FormError, SelectInput, TextArea, TextInput, Toggle } from "@/ui/Form";
 import { WorkflowBar } from "@/ui/WorkflowBar";
 import { useAction } from "@/ui/use-action";
 
-type V = { kind: string; category: string; title: string; description: string; price: string; stock: string; unlimited: boolean; delivery: string };
+type V = { kind: string; category: string; title: string; description: string; price: string; stock: string; unlimited: boolean; delivery: string; images: string[] };
 type Existing = { id: string; status: ContentStatus; rejectReason: string | null; canApprove: boolean } & V;
 
 /** SELL-05 Create / SELL-06 Edit Product + publish workflow (mockup 129). */
 export function ListingEditor({ existing }: { existing?: Existing }) {
   const router = useRouter();
-  const [v, setV] = useState<V>(existing ?? { kind: "product", category: "book", title: "", description: "", price: "", stock: "1", unlimited: false, delivery: "ship" });
+  const [v, setV] = useState<V>(existing ?? { kind: "product", category: "book", title: "", description: "", price: "", stock: "1", unlimited: false, delivery: "ship", images: [] });
   const { run, pending, error } = useAction();
   const set = (k: keyof V) => (e: { target: { value: string } }) => setV((x) => ({ ...x, [k]: e.target.value }));
   const online = v.kind === "digital" || v.kind === "course";
@@ -28,6 +29,7 @@ export function ListingEditor({ existing }: { existing?: Existing }) {
     price: Number(v.price || 0),
     stock: v.unlimited ? null : Number(v.stock || 0),
     delivery: online ? "online" : v.delivery,
+    images: v.images,
   });
 
   return (
@@ -80,6 +82,7 @@ export function ListingEditor({ existing }: { existing?: Existing }) {
               ))}
             </SelectInput>
           </div>
+          <ImageUploader purpose="listing" label="Ảnh sản phẩm" value={v.images} onChange={(images) => setV((x) => ({ ...x, images }))} />
           <TextInput label="Tiêu đề" value={v.title} onChange={set("title")} maxLength={120} />
           <TextArea label="Mô tả" value={v.description} onChange={set("description")} maxLength={5000} rows={5} placeholder="Tình trạng, nội dung, cách nhận hàng…" />
           <AmountInput label="Giá bán (VND)" value={v.price} onChange={(p) => setV({ ...v, price: p })} />

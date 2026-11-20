@@ -35,6 +35,27 @@ async function migrate(c: Client): Promise<void> {
   );
   for (const m of MIGRATIONS) {
     if (applied.has(m.version)) continue;
+    if (m.rebuild) {
+      // One script on one stream (works for local files and Turso): FK enforcement must be off while the
+      // old table is dropped, or ON DELETE CASCADE would wipe child rows. The rebuild copies rows unchanged;
+      // PRAGMA foreign_key_check runs right after commit and stops start-up if anything is inconsistent.
+      const stmts = m.statements.map((x) => x.trim().replace(/;$/, "")).join(";\n");
+      try {
+        await c.executeMultiple(`PRAGMA foreign_keys = OFF;
+BEGIN;
+${stmts};
+INSERT INTO schema_migrations (version, applied_at) VALUES (${m.version}, '${new Date().toISOString()}');
+COMMIT;`);
+      } catch (err) {
+        await c.execute("ROLLBACK").catch(() => undefined);
+        await c.execute("PRAGMA foreign_keys = ON").catch(() => undefined);
+        throw err;
+      }
+      const bad = await c.execute("PRAGMA foreign_key_check");
+      await c.execute("PRAGMA foreign_keys = ON");
+      if (bad.rows.length) throw new Error(`Migration ${m.version}: foreign key check failed (${bad.rows.length} rows)`);
+      continue;
+    }
     await c.batch(
       [
         ...m.statements.map((sql) => ({ sql, args: [] })),

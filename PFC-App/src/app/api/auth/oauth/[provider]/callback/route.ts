@@ -1,8 +1,10 @@
 import { createHmac } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { OAUTH_COOKIE, OAUTH_ENDPOINTS, isProvider, normaliseProfile, openState, providerConfig, stateMatches, type Provider, type ProviderConfig } from "@/platform/auth/oauth";
+import { linkIdentity, twoFactorStatus } from "@/platform/account/service";
+import { CHALLENGE_COOKIE, CHALLENGE_TTL, sealChallenge } from "@/platform/auth/challenge";
 import { socialSignIn } from "@/platform/auth/service";
-import { startSession } from "@/platform/auth/session";
+import { currentMember, startSession } from "@/platform/auth/session";
 import { ActionError } from "@/platform/errors";
 import { publicUrl } from "@/platform/mail";
 
@@ -65,13 +67,41 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ prov
     if (!token) return fail("oauth_failed");
     const profile = normaliseProfile(provider, await fetchProfile(provider, cfg, token));
     if (!profile) return fail("oauth_failed");
+    const done = (path: string) => {
+      const r = NextResponse.redirect(new URL(path, req.url));
+      r.cookies.set(OAUTH_COOKIE, "", { path: "/api/auth/oauth", maxAge: 0 });
+      return r;
+    };
+    if (sealed.link) {
+      // Linking from settings: must still be the same signed-in member who started it.
+      const me = await currentMember();
+      if (!me || me.id !== sealed.link) return fail("oauth_state");
+      await linkIdentity(me.id, profile);
+      return done(`/more/account/linked?linked=${provider}`);
+    }
     const memberId = await socialSignIn(profile);
+    if ((await twoFactorStatus(memberId)).enabled) {
+      const r = done("/login/2fa");
+      r.cookies.set(CHALLENGE_COOKIE, sealChallenge({ sub: memberId, remember: sealed.remember, next: sealed.next, exp: Math.floor(Date.now() / 1000) + CHALLENGE_TTL }, process.env.PFC_SESSION_SECRET ?? ""), {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production" && process.env.PFC_INSECURE_COOKIES !== "1",
+        path: "/",
+        maxAge: CHALLENGE_TTL,
+      });
+      return r;
+    }
     await startSession(memberId, { remember: sealed.remember });
-    const r = NextResponse.redirect(new URL(sealed.next, req.url));
-    r.cookies.set(OAUTH_COOKIE, "", { path: "/api/auth/oauth", maxAge: 0 });
-    return r;
+    return done(sealed.next);
   } catch (err) {
-    if (err instanceof ActionError && err.code) return fail(err.code);
+    if (err instanceof ActionError && err.code) {
+      if (sealed.link) {
+        const r = NextResponse.redirect(new URL(`/more/account/linked?error=${err.code}`, req.url));
+        r.cookies.set(OAUTH_COOKIE, "", { path: "/api/auth/oauth", maxAge: 0 });
+        return r;
+      }
+      return fail(err.code);
+    }
     console.error("[oauth]", provider, err);
     return fail("oauth_failed");
   }

@@ -26,8 +26,12 @@ The single presentation layer for PFC Digital Hub: open it in a phone browser an
 | `src/app/learn/` | Education interior: courses, lessons, certificates, quizzes, resources, forum, my learning, manage |
 | `src/app/market/` | Marketplace interior: discover, product, shop, cart, checkout, orders, seller channel, favorites, moderation |
 | `src/app/projects/` | Project interior: discover, detail, workspace (tasks, updates, team, docs, analytics), mine, mentors, approval |
+| `src/app/(app)/community`, `messages`, `members/[id]` | Community (G3): feed, posts, groups, member directory, moderation, 1-to-1 messages |
+| `src/app/(app)/events` | Events (G4): discover, detail, register, tickets + QR, create/edit, manage, check-in, review |
+| `src/app/(app)/payments` + `api/payments/vnpay/*` | Payments (G5): VNPAY return/IPN, history, result, refunds, payouts, staff overview |
+| `src/app/api/jobs/tick` | Daily job (CRON_SECRET): payment/order expiry, event reminders |
 | `src/app/api/hub/[hub]/[[...path]]` | Hub gateway (allow-list, cookie isolation) |
-| `src/modules/finance`, `education`, `market`, `projects` | Native hubs: pure `domain/` + actor-based `server/service.ts` (every permission checked there) + `server/actions.ts` + `ui/` |
+| `src/modules/finance`, `education`, `market`, `projects`, `community`, `events`, `payments` | Native hubs: pure `domain/` + actor-based `server/service.ts` (every permission checked there) + `server/actions.ts` + `ui/` |
 | `src/modules/opportunity`, `src/modules/club` | API types, session providers, hub UI pieces |
 | `src/platform/` | `db` (libSQL + migrations), `auth` (PFC account, hub cookies), `roles` (permission matrix), `workflow` (content approval), `admin`, `audit`, `rate-limit`, `hub-proxy`, `pwa`, `theme` |
 | `src/ui/` | Shared mobile components, charts |

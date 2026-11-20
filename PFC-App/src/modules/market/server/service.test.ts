@@ -136,3 +136,22 @@ describe("suspension", () => {
     expect((await mkt.listPublished()).map((l) => l.id)).not.toContain(listingId);
   });
 });
+
+describe("listing photos", () => {
+  it("accepts the seller's own uploads only, keeping the order", async () => {
+    const sharp = (await import("sharp")).default;
+    const { saveImage } = await import("@/platform/uploads/service");
+    process.env.PFC_UPLOAD_DIR = ".data/test/uploads";
+    const png = await sharp({ create: { width: 40, height: 30, channels: 3, background: "#ffffff" } }).png().toBuffer();
+    await mkt.registerSeller(owner, { shopName: "Shop Chủ nhiệm", contact: "Zalo 0900000000" });
+    const a = await saveImage(owner, "listing", png);
+    const b = await saveImage(owner, "listing", png);
+    const foreign = await saveImage(buyer, "listing", png);
+    const id = await mkt.createListing(owner, { ...LISTING, title: "Sách có ảnh", images: [b.url, a.url] });
+    expect((await mkt.getListing(owner, id))?.images).toEqual([b.url, a.url]);
+    await expect(mkt.createListing(owner, { ...LISTING, images: [foreign.url] })).rejects.toThrow(/không phải của bạn/);
+    await expect(mkt.createListing(owner, { ...LISTING, images: ["https://evil.example/x.png"] })).rejects.toThrow(/không phải của bạn/);
+    await mkt.updateListing(owner, id, { ...LISTING, title: "Sách có ảnh", images: [a.url] });
+    expect((await mkt.getListing(owner, id))?.images).toEqual([a.url]);
+  });
+});

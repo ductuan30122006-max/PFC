@@ -58,6 +58,9 @@ describe("membership & roles", () => {
     await prj.decideRequest(owner, pid, dev.id, true);
 
     await prj.inviteMember(owner, pid, { email: lead.email, role: "lead" });
+    const { listNotifications } = await import("@/platform/notifications/service");
+    expect((await listNotifications(lead.id))[0]?.title).toMatch(/được mời tham gia dự án/);
+    expect((await listNotifications(owner.id)).some((n) => /yêu cầu tham gia/.test(n.title))).toBe(true);
     expect((await prj.myProjects(lead)).map((p) => [p.id, p.myRole, p.myStatus])).toEqual([[pid, "lead", "invited"]]);
     expect((await prj.projectHomeStats(lead)).invites).toBe(1);
     await prj.respondInvite(lead, pid, true);

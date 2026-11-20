@@ -4,13 +4,15 @@ import { requireMember, toActor } from "@/platform/auth/session";
 import { formatVnd } from "@/lib/money";
 import { ORDER_STATUS_LABEL, ORDER_TONE, PAYMENT_LABEL, type OrderStatus } from "@/modules/market/domain/orders";
 import { getOrder } from "@/modules/market/server/service";
-import { AppHeader, Badge, Card, Section } from "@/ui";
+import { REFUND_STATUS_LABEL, onlinePaymentEnabled, paymentForRef, refundForRef } from "@/modules/payments/server/service";
+import { AppHeader, Badge, ButtonLink, Card, Section } from "@/ui";
 import { cx } from "@/ui/cx";
-import { OrderActions, ReviewButton } from "./OrderClient";
+import { OrderActions, PayOrderButton, ReviewButton } from "./OrderClient";
 
 export const dynamic = "force-dynamic";
 
-const EVENT_LABEL: Record<string, string> = { ...ORDER_STATUS_LABEL, paid: "Người bán xác nhận đã nhận tiền" };
+const EVENT_LABEL: Record<string, string> = { ...ORDER_STATUS_LABEL, paid: "Đã thanh toán", refunded: "Đã hoàn tiền", stock_released: "Trả lại hàng vào kho" };
+const PAY_STATUS: Record<string, string> = { unpaid: "Chưa thanh toán", paid: "Đã thanh toán", refunded: "Đã hoàn tiền" };
 
 /** MKT-17 Order Detail / SELL-11 Seller Order Detail (mockup 66). Visible to buyer and seller only. */
 export default async function OrderPage({ params }: { params: Promise<{ id: string }> }) {
@@ -18,6 +20,10 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
   const me = await requireMember(`/market/orders/${id}`);
   const o = await getOrder(toActor(me), id);
   if (!o) notFound();
+  const vnpay = o.paymentMethod === "vnpay";
+  const [payment, refund] = vnpay ? await Promise.all([paymentForRef("mkt_order", id), refundForRef("mkt_order", id)]) : [null, null];
+  const canPay = vnpay && o.role === "buyer" && o.status === "placed" && o.paymentStatus === "unpaid" && onlinePaymentEnabled();
+  const canAskRefund = vnpay && o.role === "buyer" && o.paymentStatus === "paid" && o.status !== "cancelled" && !refund;
   return (
     <>
       <AppHeader back backFallback={o.role === "buyer" ? "/market/orders" : "/market/sell/orders"} title="Chi tiết đơn hàng" />
@@ -54,7 +60,7 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
         <dl className="divide-y divide-line rounded-[var(--radius-card)] border border-line bg-surface text-[14px]">
           {[
             ["Phương thức", PAYMENT_LABEL[o.paymentMethod]],
-            ["Thanh toán", o.paymentStatus === "paid" ? "Đã thanh toán" : "Chưa thanh toán"],
+            ["Thanh toán", PAY_STATUS[o.paymentStatus] ?? o.paymentStatus],
             [o.role === "buyer" ? "Người bán" : "Người mua", o.role === "buyer" ? o.shopName : o.buyerName],
             ...(o.role === "buyer" && o.sellerContact ? [["Liên hệ người bán", o.sellerContact]] : []),
             ["Người nhận", `${o.recipientName} · ${o.recipientPhone}`],
@@ -69,6 +75,28 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
           ))}
         </dl>
       </Section>
+      {(canPay || canAskRefund || refund || payment) && (
+        <Section>
+          <div className="space-y-2">
+            {canPay && <PayOrderButton orderId={o.id} />}
+            {refund && (
+              <ButtonLink href={`/payments/refunds/${refund.id}`} variant="secondary" block>
+                Hoàn tiền: {REFUND_STATUS_LABEL[refund.status]}
+              </ButtonLink>
+            )}
+            {canAskRefund && (
+              <ButtonLink href={`/payments/refunds/new?ref=mkt_order:${o.id}`} variant="ghost" block>
+                Yêu cầu hoàn tiền
+              </ButtonLink>
+            )}
+            {payment && (
+              <ButtonLink href={`/payments/${payment.id}`} variant="ghost" block>
+                Xem giao dịch VNPAY
+              </ButtonLink>
+            )}
+          </div>
+        </Section>
+      )}
       {o.actions.length > 0 && (
         <Section>
           <OrderActions orderId={o.id} actions={o.actions} role={o.role} paymentMethod={o.paymentMethod} />

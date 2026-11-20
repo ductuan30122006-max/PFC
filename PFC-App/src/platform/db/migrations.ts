@@ -2,7 +2,11 @@
  * Forward-only, append-only migrations. Never edit a shipped entry — add a new version.
  * Money is stored as INTEGER VND (no minor unit) to avoid float drift.
  */
-export const MIGRATIONS: ReadonlyArray<{ version: number; statements: string[] }> = [
+/**
+ * `rebuild: true` = a table rebuild (SQLite cannot ALTER a CHECK constraint): the runner switches foreign
+ * keys OFF around one transaction, runs PRAGMA foreign_key_check, then switches them back ON.
+ */
+export const MIGRATIONS: ReadonlyArray<{ version: number; statements: string[]; rebuild?: boolean }> = [
   {
     version: 1,
     statements: [
@@ -407,6 +411,445 @@ export const MIGRATIONS: ReadonlyArray<{ version: number; statements: string[] }
         PRIMARY KEY (provider, subject)
       )`,
       `CREATE INDEX member_identities_member ON member_identities (member_id)`,
+    ],
+  },
+  {
+    version: 7,
+    statements: [
+      // Shared rate-limit counters (NFR-S-007): works across serverless instances. Keys are SHA-256 hashes (no emails/IPs stored).
+      `CREATE TABLE rate_limits (
+        key TEXT PRIMARY KEY,
+        count INTEGER NOT NULL,
+        reset_at INTEGER NOT NULL
+      )`,
+      // Uploaded files (images for listings, avatars…). Bytes live in storage (local disk in dev, Vercel Blob in production).
+      `CREATE TABLE uploads (
+        id TEXT PRIMARY KEY,
+        owner_id TEXT NOT NULL REFERENCES members(id),
+        purpose TEXT NOT NULL,
+        mime TEXT NOT NULL,
+        bytes INTEGER NOT NULL,
+        width INTEGER,
+        height INTEGER,
+        storage_key TEXT NOT NULL,
+        url TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )`,
+      `CREATE INDEX uploads_owner ON uploads (owner_id, created_at)`,
+      `ALTER TABLE mkt_listings ADD COLUMN images TEXT NOT NULL DEFAULT '[]'`,
+    ],
+  },
+  {
+    version: 8,
+    statements: [
+      // G1 profile (mockup 266), onboarding (7), language (270), privacy (272), deletion (275).
+      `ALTER TABLE members ADD COLUMN phone TEXT`,
+      `ALTER TABLE members ADD COLUMN birth_date TEXT`,
+      `ALTER TABLE members ADD COLUMN gender TEXT`,
+      `ALTER TABLE members ADD COLUMN address TEXT`,
+      `ALTER TABLE members ADD COLUMN bio TEXT NOT NULL DEFAULT ''`,
+      `ALTER TABLE members ADD COLUMN avatar_url TEXT`,
+      `ALTER TABLE members ADD COLUMN interests TEXT NOT NULL DEFAULT '[]'`,
+      `ALTER TABLE members ADD COLUMN onboarded_at TEXT`,
+      `ALTER TABLE members ADD COLUMN locale TEXT NOT NULL DEFAULT 'vi'`,
+      `ALTER TABLE members ADD COLUMN privacy TEXT NOT NULL DEFAULT '{}'`,
+      `ALTER TABLE members ADD COLUMN deleted_at TEXT`,
+      // Existing accounts skip onboarding.
+      `UPDATE members SET onboarded_at = created_at WHERE onboarded_at IS NULL`,
+      // One-time-token payload (new email for "đổi email").
+      `ALTER TABLE auth_tokens ADD COLUMN payload TEXT`,
+      // G1 devices (mockup 269): every signed-in browser is a row; revoking it signs that device out.
+      `CREATE TABLE member_sessions (
+        id TEXT PRIMARY KEY,
+        member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        device TEXT NOT NULL,
+        ip_hint TEXT,
+        created_at TEXT NOT NULL,
+        last_seen_at TEXT NOT NULL,
+        revoked_at TEXT
+      )`,
+      `CREATE INDEX member_sessions_member ON member_sessions (member_id, revoked_at)`,
+      // G1 two-step login (mockup 268): TOTP secret encrypted at rest + hashed backup codes.
+      `CREATE TABLE member_totp (
+        member_id TEXT PRIMARY KEY REFERENCES members(id) ON DELETE CASCADE,
+        secret_enc TEXT NOT NULL,
+        enabled_at TEXT,
+        backup_codes TEXT NOT NULL DEFAULT '[]',
+        last_step INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+      )`,
+      // G1 consent history (Nghị định 13/2023: record what was agreed and when).
+      `CREATE TABLE member_consents (
+        id TEXT PRIMARY KEY,
+        member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL,
+        granted INTEGER NOT NULL,
+        version TEXT,
+        created_at TEXT NOT NULL
+      )`,
+      `CREATE INDEX member_consents_member ON member_consents (member_id, kind, created_at)`,
+      // G2 notification center (NOT-01…05).
+      `CREATE TABLE notifications (
+        id TEXT PRIMARY KEY,
+        member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        category TEXT NOT NULL,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL DEFAULT '',
+        href TEXT,
+        dedupe_key TEXT,
+        created_at TEXT NOT NULL,
+        read_at TEXT
+      )`,
+      `CREATE INDEX notifications_member ON notifications (member_id, created_at)`,
+      `CREATE UNIQUE INDEX notifications_dedupe ON notifications (member_id, dedupe_key)`,
+      `CREATE TABLE notification_prefs (
+        member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        category TEXT NOT NULL,
+        channel TEXT NOT NULL,
+        enabled INTEGER NOT NULL,
+        PRIMARY KEY (member_id, category, channel)
+      )`,
+      `CREATE TABLE push_subscriptions (
+        endpoint TEXT PRIMARY KEY,
+        member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        p256dh TEXT NOT NULL,
+        auth TEXT NOT NULL,
+        device TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        last_ok_at TEXT
+      )`,
+      `CREATE INDEX push_subscriptions_member ON push_subscriptions (member_id)`,
+    ],
+  },
+  {
+    version: 9,
+    statements: [
+      // G3 Community Hub (COM-01…22, mockups 73–84, 103–108, 133–139).
+      `CREATE TABLE com_groups (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        topic TEXT NOT NULL DEFAULT 'other',
+        visibility TEXT NOT NULL DEFAULT 'public',
+        cover_url TEXT,
+        owner_id TEXT NOT NULL REFERENCES members(id),
+        status TEXT NOT NULL DEFAULT 'active',
+        archived_reason TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )`,
+      `CREATE TABLE com_group_members (
+        group_id TEXT NOT NULL REFERENCES com_groups(id) ON DELETE CASCADE,
+        member_id TEXT NOT NULL REFERENCES members(id),
+        role TEXT NOT NULL DEFAULT 'member',
+        status TEXT NOT NULL DEFAULT 'active',
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (group_id, member_id)
+      )`,
+      `CREATE INDEX com_group_members_member ON com_group_members (member_id, status)`,
+      `CREATE TABLE com_posts (
+        id TEXT PRIMARY KEY,
+        author_id TEXT NOT NULL REFERENCES members(id),
+        group_id TEXT REFERENCES com_groups(id) ON DELETE CASCADE,
+        title TEXT NOT NULL DEFAULT '',
+        body TEXT NOT NULL,
+        topic TEXT NOT NULL DEFAULT 'other',
+        tags TEXT NOT NULL DEFAULT '[]',
+        images TEXT NOT NULL DEFAULT '[]',
+        allow_comments INTEGER NOT NULL DEFAULT 1,
+        status TEXT NOT NULL DEFAULT 'published',
+        hidden_reason TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        last_activity_at TEXT NOT NULL
+      )`,
+      `CREATE INDEX com_posts_feed ON com_posts (status, last_activity_at)`,
+      `CREATE INDEX com_posts_group ON com_posts (group_id, status, created_at)`,
+      `CREATE INDEX com_posts_author ON com_posts (author_id, created_at)`,
+      `CREATE TABLE com_poll_options (
+        id TEXT PRIMARY KEY,
+        post_id TEXT NOT NULL REFERENCES com_posts(id) ON DELETE CASCADE,
+        label TEXT NOT NULL,
+        position INTEGER NOT NULL
+      )`,
+      `CREATE TABLE com_poll_votes (
+        post_id TEXT NOT NULL REFERENCES com_posts(id) ON DELETE CASCADE,
+        member_id TEXT NOT NULL REFERENCES members(id),
+        option_id TEXT NOT NULL REFERENCES com_poll_options(id) ON DELETE CASCADE,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (post_id, member_id)
+      )`,
+      `CREATE TABLE com_comments (
+        id TEXT PRIMARY KEY,
+        post_id TEXT NOT NULL REFERENCES com_posts(id) ON DELETE CASCADE,
+        author_id TEXT NOT NULL REFERENCES members(id),
+        parent_id TEXT,
+        body TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'visible',
+        created_at TEXT NOT NULL
+      )`,
+      `CREATE INDEX com_comments_post ON com_comments (post_id, created_at)`,
+      `CREATE TABLE com_reactions (
+        post_id TEXT NOT NULL REFERENCES com_posts(id) ON DELETE CASCADE,
+        member_id TEXT NOT NULL REFERENCES members(id),
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (post_id, member_id)
+      )`,
+      `CREATE TABLE com_saved (
+        post_id TEXT NOT NULL REFERENCES com_posts(id) ON DELETE CASCADE,
+        member_id TEXT NOT NULL REFERENCES members(id),
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (post_id, member_id)
+      )`,
+      `CREATE TABLE com_follows (
+        follower_id TEXT NOT NULL REFERENCES members(id),
+        followee_id TEXT NOT NULL REFERENCES members(id),
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (follower_id, followee_id)
+      )`,
+      `CREATE INDEX com_follows_followee ON com_follows (followee_id)`,
+      `CREATE TABLE com_blocks (
+        blocker_id TEXT NOT NULL REFERENCES members(id),
+        blocked_id TEXT NOT NULL REFERENCES members(id),
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (blocker_id, blocked_id)
+      )`,
+      `CREATE TABLE com_reports (
+        id TEXT PRIMARY KEY,
+        reporter_id TEXT NOT NULL REFERENCES members(id),
+        target_type TEXT NOT NULL,
+        target_id TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        details TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'open',
+        decided_by TEXT,
+        decision_note TEXT,
+        decided_at TEXT,
+        created_at TEXT NOT NULL,
+        UNIQUE (reporter_id, target_type, target_id)
+      )`,
+      `CREATE INDEX com_reports_status ON com_reports (status, created_at)`,
+      // Direct messages (mockups 79–80, 137–139).
+      `CREATE TABLE dm_conversations (
+        id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL DEFAULT 'direct',
+        pair_key TEXT UNIQUE,
+        title TEXT,
+        created_by TEXT NOT NULL REFERENCES members(id),
+        created_at TEXT NOT NULL,
+        last_message_at TEXT NOT NULL
+      )`,
+      `CREATE TABLE dm_participants (
+        conversation_id TEXT NOT NULL REFERENCES dm_conversations(id) ON DELETE CASCADE,
+        member_id TEXT NOT NULL REFERENCES members(id),
+        last_read_at TEXT,
+        PRIMARY KEY (conversation_id, member_id)
+      )`,
+      `CREATE INDEX dm_participants_member ON dm_participants (member_id)`,
+      `CREATE TABLE dm_messages (
+        id TEXT PRIMARY KEY,
+        conversation_id TEXT NOT NULL REFERENCES dm_conversations(id) ON DELETE CASCADE,
+        sender_id TEXT NOT NULL REFERENCES members(id),
+        body TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        deleted_at TEXT
+      )`,
+      `CREATE INDEX dm_messages_conv ON dm_messages (conversation_id, created_at)`,
+    ],
+  },
+  {
+    version: 10,
+    statements: [
+      // G4 Shared Event Engine (EVT-01…15, A01…05; mockups 70–72, 118–120, 140–141). Times: Vietnam local "YYYY-MM-DDTHH:mm".
+      `CREATE TABLE evt_events (
+        id TEXT PRIMARY KEY,
+        organizer_id TEXT NOT NULL REFERENCES members(id),
+        group_id TEXT REFERENCES com_groups(id),
+        title TEXT NOT NULL,
+        summary TEXT NOT NULL DEFAULT '',
+        description TEXT NOT NULL DEFAULT '',
+        category TEXT NOT NULL DEFAULT 'other',
+        mode TEXT NOT NULL DEFAULT 'offline',
+        location TEXT NOT NULL DEFAULT '',
+        online_url TEXT,
+        starts_at TEXT NOT NULL,
+        ends_at TEXT NOT NULL,
+        registration_deadline TEXT,
+        cover_url TEXT,
+        capacity INTEGER,
+        pay_at_door INTEGER NOT NULL DEFAULT 0,
+        agenda TEXT NOT NULL DEFAULT '[]',
+        speakers TEXT NOT NULL DEFAULT '[]',
+        tags TEXT NOT NULL DEFAULT '[]',
+        status TEXT NOT NULL DEFAULT 'draft',
+        reject_reason TEXT,
+        cancel_reason TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        published_at TEXT
+      )`,
+      `CREATE INDEX evt_events_list ON evt_events (status, starts_at)`,
+      `CREATE TABLE evt_ticket_types (
+        id TEXT PRIMARY KEY,
+        event_id TEXT NOT NULL REFERENCES evt_events(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        price INTEGER NOT NULL CHECK (price >= 0),
+        capacity INTEGER,
+        position INTEGER NOT NULL DEFAULT 0
+      )`,
+      `CREATE TABLE evt_registrations (
+        id TEXT PRIMARY KEY,
+        event_id TEXT NOT NULL REFERENCES evt_events(id) ON DELETE CASCADE,
+        member_id TEXT NOT NULL REFERENCES members(id),
+        ticket_type_id TEXT NOT NULL REFERENCES evt_ticket_types(id),
+        status TEXT NOT NULL,
+        price INTEGER NOT NULL,
+        paid INTEGER NOT NULL DEFAULT 0,
+        payment_id TEXT,
+        attendee_name TEXT NOT NULL,
+        attendee_email TEXT NOT NULL,
+        attendee_phone TEXT NOT NULL DEFAULT '',
+        ticket_code TEXT NOT NULL UNIQUE,
+        hold_until TEXT,
+        checked_in_at TEXT,
+        checked_in_by TEXT,
+        cancel_reason TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )`,
+      `CREATE INDEX evt_registrations_event ON evt_registrations (event_id, status)`,
+      `CREATE INDEX evt_registrations_member ON evt_registrations (member_id, created_at)`,
+      `CREATE UNIQUE INDEX evt_registrations_one ON evt_registrations (event_id, member_id) WHERE status IN ('pending_payment','confirmed')`,
+      `CREATE TABLE evt_favorites (
+        event_id TEXT NOT NULL REFERENCES evt_events(id) ON DELETE CASCADE,
+        member_id TEXT NOT NULL REFERENCES members(id),
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (event_id, member_id)
+      )`,
+      `CREATE TABLE evt_reminders (
+        event_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        sent_at TEXT NOT NULL,
+        PRIMARY KEY (event_id, kind)
+      )`,
+    ],
+  },
+  {
+    version: 11,
+    statements: [
+      // G5 Payments (PAY-01…08, A01…05; mockups 61–64, 68–69, 133–135). INTEGER VND. Provider: VNPAY.
+      `CREATE TABLE payments (
+        id TEXT PRIMARY KEY,
+        txn_ref TEXT NOT NULL UNIQUE,
+        payer_id TEXT NOT NULL REFERENCES members(id),
+        purpose TEXT NOT NULL,
+        amount INTEGER NOT NULL CHECK (amount > 0),
+        provider TEXT NOT NULL DEFAULT 'vnpay',
+        status TEXT NOT NULL DEFAULT 'pending',
+        provider_txn_no TEXT,
+        bank_code TEXT,
+        card_type TEXT,
+        response_code TEXT,
+        paid_at TEXT,
+        expires_at TEXT NOT NULL,
+        return_path TEXT NOT NULL,
+        description TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )`,
+      `CREATE INDEX payments_payer ON payments (payer_id, created_at)`,
+      `CREATE INDEX payments_status ON payments (status, expires_at)`,
+      `CREATE TABLE payment_items (
+        payment_id TEXT NOT NULL REFERENCES payments(id) ON DELETE CASCADE,
+        ref_type TEXT NOT NULL,
+        ref_id TEXT NOT NULL,
+        payee_id TEXT NOT NULL REFERENCES members(id),
+        amount INTEGER NOT NULL,
+        fee INTEGER NOT NULL DEFAULT 0,
+        payout_id TEXT,
+        PRIMARY KEY (payment_id, ref_type, ref_id)
+      )`,
+      `CREATE INDEX payment_items_ref ON payment_items (ref_type, ref_id)`,
+      `CREATE INDEX payment_items_payee ON payment_items (payee_id, payout_id)`,
+      `CREATE TABLE payment_events (
+        id TEXT PRIMARY KEY,
+        payment_id TEXT NOT NULL REFERENCES payments(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL,
+        detail TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL
+      )`,
+      `CREATE TABLE refunds (
+        id TEXT PRIMARY KEY,
+        payment_id TEXT NOT NULL REFERENCES payments(id),
+        ref_type TEXT NOT NULL,
+        ref_id TEXT NOT NULL,
+        requester_id TEXT NOT NULL REFERENCES members(id),
+        amount INTEGER NOT NULL CHECK (amount > 0),
+        reason TEXT NOT NULL,
+        details TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'requested',
+        decided_by TEXT,
+        decision_note TEXT,
+        provider_ref TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )`,
+      `CREATE INDEX refunds_status ON refunds (status, created_at)`,
+      `CREATE UNIQUE INDEX refunds_one_open ON refunds (ref_type, ref_id) WHERE status IN ('requested','approved','processing')`,
+      `CREATE TABLE refund_events (
+        id TEXT PRIMARY KEY,
+        refund_id TEXT NOT NULL REFERENCES refunds(id) ON DELETE CASCADE,
+        status TEXT NOT NULL,
+        note TEXT,
+        actor_id TEXT,
+        created_at TEXT NOT NULL
+      )`,
+      `CREATE TABLE payouts (
+        id TEXT PRIMARY KEY,
+        payee_id TEXT NOT NULL REFERENCES members(id),
+        amount INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        note TEXT NOT NULL DEFAULT '',
+        paid_at TEXT,
+        paid_by TEXT,
+        created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )`,
+    ],
+  },
+  {
+    version: 12,
+    rebuild: true,
+    statements: [
+      // Marketplace orders accept online payment (VNPAY) and a "refunded" payment state. SQLite cannot alter a
+      // CHECK constraint, so the table is rebuilt (rows copied unchanged; child tables keep their references).
+      `CREATE TABLE mkt_orders_new (
+        id TEXT PRIMARY KEY,
+        code TEXT NOT NULL UNIQUE,
+        buyer_id TEXT NOT NULL REFERENCES members(id),
+        seller_id TEXT NOT NULL REFERENCES members(id),
+        status TEXT NOT NULL,
+        payment_method TEXT NOT NULL CHECK (payment_method IN ('cod','bank_transfer','in_person','vnpay')),
+        payment_status TEXT NOT NULL DEFAULT 'unpaid' CHECK (payment_status IN ('unpaid','paid','refunded')),
+        total INTEGER NOT NULL CHECK (total >= 0),
+        recipient_name TEXT NOT NULL,
+        recipient_phone TEXT NOT NULL,
+        address TEXT NOT NULL DEFAULT '',
+        note TEXT NOT NULL DEFAULT '',
+        cancel_reason TEXT,
+        checkout_key TEXT,
+        payment_due_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )`,
+      `INSERT INTO mkt_orders_new (id, code, buyer_id, seller_id, status, payment_method, payment_status, total, recipient_name, recipient_phone, address, note, cancel_reason, checkout_key, created_at, updated_at)
+       SELECT id, code, buyer_id, seller_id, status, payment_method, payment_status, total, recipient_name, recipient_phone, address, note, cancel_reason, checkout_key, created_at, updated_at FROM mkt_orders`,
+      `DROP TABLE mkt_orders`,
+      `ALTER TABLE mkt_orders_new RENAME TO mkt_orders`,
+      `CREATE INDEX mkt_orders_buyer ON mkt_orders(buyer_id, created_at)`,
+      `CREATE INDEX mkt_orders_seller ON mkt_orders(seller_id, created_at)`,
+      `CREATE UNIQUE INDEX mkt_orders_checkout ON mkt_orders(buyer_id, seller_id, checkout_key)`,
     ],
   },
 ];
