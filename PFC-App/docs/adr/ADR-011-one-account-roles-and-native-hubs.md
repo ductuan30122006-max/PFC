@@ -89,3 +89,26 @@ Each hub follows the same layout: `src/modules/<hub>/{domain (pure, tested), ser
 - **Tests:** 143 unit and service tests, including permission tests for every role boundary the member listed. Every hub flow was browser-tested on a 375 px viewport with the demo accounts from `npm run db:seed`.
 - **Seed:** `scripts/seed-hubs.ts` deliberately seeds **no** courses, listings or projects. Content comes from members, so no business data is invented (AGENTS rule 8).
 - **Not built yet:** paid collaboration (Q08), VNPAY, image/file uploads (links only) and notifications for hub events.
+
+## Addendum (20/11/2026): sign-in screens SYS-02…06
+- **Login / register** (`/login`, `/register`): one screen with the tabs Đăng nhập / Đăng ký, plus Google / Facebook, email + password, "Ghi nhớ đăng nhập" and "Quên mật khẩu?".
+  - Ticked: 30-day cookie. Unticked: browser-session cookie whose token expires after 12 h.
+- **Social sign-in** (`/api/auth/oauth/{google|facebook}/{start|callback}`):
+  - Server-side authorization-code flow. State and the PKCE verifier are sealed in a 10-minute httpOnly cookie, and secrets stay on the server.
+  - A provider without keys is shown disabled with a reason.
+  - An existing account is linked only when the provider verified the email (Google). Facebook emails never auto-link, which prevents account takeover.
+- **Login states:**
+  - Field validation.
+  - An identical message for an unknown email and a wrong password.
+  - A remaining-attempts warning, then a 15-minute block with a countdown (5 failures per email, 20 per IP).
+  - Locked and unverified are only revealed after a correct password.
+- **Forgot / reset / verify** (`/forgot-password`, `/reset-password`, `/verify-email`):
+  - Tokens are single use and stored hashed: reset lasts 30 minutes, verification 24 hours.
+  - The forgot-password answer is the same whether or not the email exists.
+  - A reset bumps `members.session_version`, which signs out every device.
+  - Verification is a POST from the page, so mail scanners that prefetch links cannot use it up.
+- **Configuration:**
+  - `PFC_PUBLIC_URL`
+  - `GOOGLE_CLIENT_ID/SECRET`, `FACEBOOK_APP_ID/SECRET`
+  - `PFC_MAIL_MODE` (`log` for dev, `resend` with `RESEND_API_KEY` / `PFC_MAIL_FROM` for production)
+  - `PFC_REQUIRE_EMAIL_VERIFICATION=1`

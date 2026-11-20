@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { one } from "@/platform/db/client";
 import { ActionError as ActionErrorImpl } from "@/platform/errors";
 import { isDepartment, isRole, type Actor, type Department, type Role } from "@/platform/roles";
-import { SESSION_COOKIE, SESSION_TTL_SECONDS, createSessionToken, verifySessionToken } from "./session-token";
+import { SESSION_COOKIE, SESSION_TTL_SECONDS, SHORT_SESSION_TTL_SECONDS, createSessionToken, verifySessionToken } from "./session-token";
 
 export type Member = {
   id: string;
@@ -30,16 +30,23 @@ function secret(): string {
 
 const nowSec = () => Math.floor(Date.now() / 1000);
 
-export async function startSession(memberId: string): Promise<void> {
+/**
+ * Signs the member in. remember=true ("Ghi nhớ đăng nhập"): 30-day persistent cookie.
+ * remember=false: browser-session cookie whose token also expires after 12 h.
+ */
+export async function startSession(memberId: string, opts: { remember?: boolean } = {}): Promise<void> {
+  const remember = opts.remember ?? true;
+  const v = await one<{ session_version: number }>("SELECT session_version FROM members WHERE id = ?", [memberId]);
   const jar = await cookies();
   // A new PFC identity must never inherit hub sessions of the previous one.
   for (const c of HUB_COOKIES) jar.delete(c);
-  jar.set(SESSION_COOKIE, createSessionToken(memberId, secret(), nowSec()), {
+  const ttl = remember ? SESSION_TTL_SECONDS : SHORT_SESSION_TTL_SECONDS;
+  jar.set(SESSION_COOKIE, createSessionToken(memberId, secret(), nowSec(), ttl, Number(v?.session_version ?? 0)), {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production" && process.env.PFC_INSECURE_COOKIES !== "1",
     path: "/",
-    maxAge: SESSION_TTL_SECONDS,
+    ...(remember ? { maxAge: SESSION_TTL_SECONDS } : {}),
   });
 }
 
@@ -54,16 +61,18 @@ export async function currentMember(): Promise<Member | null> {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   const payload = verifySessionToken(token, secret(), nowSec());
   if (!payload) return null;
-  return memberById(payload.sub);
+  return memberById(payload.sub, payload.ver);
 }
 
 /** Loads a member; locked accounts count as signed out everywhere. */
-export async function memberById(id: string): Promise<Member | null> {
-  const row = await one<{ id: string; email: string; full_name: string; created_at: string; role: string; department: string | null; locked: number }>(
-    "SELECT id, email, full_name, created_at, role, department, locked FROM members WHERE id = ?",
+export async function memberById(id: string, sessionVersion?: number): Promise<Member | null> {
+  const row = await one<{ id: string; email: string; full_name: string; created_at: string; role: string; department: string | null; locked: number; session_version: number }>(
+    "SELECT id, email, full_name, created_at, role, department, locked, session_version FROM members WHERE id = ?",
     [id],
   );
   if (!row || Number(row.locked) === 1) return null;
+  // Sessions issued before a password reset (or "sign out everywhere") are revoked.
+  if (sessionVersion !== undefined && Number(row.session_version) !== sessionVersion) return null;
   return {
     id: row.id,
     email: row.email,

@@ -381,4 +381,32 @@ export const MIGRATIONS: ReadonlyArray<{ version: number; statements: string[] }
       )`,
     ],
   },
+  {
+    version: 6,
+    statements: [
+      // Identity & Access (FR-CORE-001, tasks 039–044): email verification, reset tokens, social sign-in, session revocation.
+      `ALTER TABLE members ADD COLUMN email_verified_at TEXT`,
+      `ALTER TABLE members ADD COLUMN session_version INTEGER NOT NULL DEFAULT 0`,
+      // Accounts created before verification existed are treated as verified (they were created by admins / seed).
+      `UPDATE members SET email_verified_at = created_at WHERE email_verified_at IS NULL`,
+      `CREATE TABLE auth_tokens (
+        token_hash TEXT PRIMARY KEY,
+        member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        purpose TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        used_at TEXT,
+        created_at TEXT NOT NULL
+      )`,
+      `CREATE INDEX auth_tokens_member ON auth_tokens (member_id, purpose)`,
+      `CREATE TABLE member_identities (
+        provider TEXT NOT NULL,
+        subject TEXT NOT NULL,
+        member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        email TEXT,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (provider, subject)
+      )`,
+      `CREATE INDEX member_identities_member ON member_identities (member_id)`,
+    ],
+  },
 ];
