@@ -51,3 +51,13 @@ BeeCount/
 PFC-Management/apps/club/.data/
 PFC-Management/apps/club/node_modules/
 PFC-Management/apps/club/.next/
+
+# Personal Finance (Flutter) — local / build
+PFC-Personal Finance/.dart_tool/
+PFC-Personal Finance/.flutter-plugins
+PFC-Personal Finance/.flutter-plugins-dependencies
+PFC-Personal Finance/.pub-cache/
+PFC-Personal Finance/.pub/
+PFC-Personal Finance/build/
+PFC-Personal Finance/.android/
+PFC-Personal Finance/.ios/

@@ -17,7 +17,7 @@ Chỉ cần chạy Opportunity Hub thì trong `PFC-Opportunity Hub/web`: copy `.
 
 ## Lệnh dán vào Cursor
 
-Thay tên module. Các hub còn lại theo SRS: Personal Finance, Education, Project, Marketplace, Community. Opportunity đã có folder. Club ops đã có ở `PFC-Management/apps/club`.
+Thay tên module. Các hub còn lại theo SRS: Education, Project, Marketplace, Community. Đã có folder: Opportunity (`PFC-Opportunity Hub/`), Club ops (`PFC-Management/apps/club`), Personal Finance / Quỹ (`PFC-Personal Finance/` — Flutter, upstream finance_app).
 
 ```
 Đọc NEXT.md, source/ (SRS v3.0, Screen Inventory, checklist, ảnh mockup) và PFC-Opportunity Hub (architecture.md, AGENTS.md, data-model.md, adrs). Làm module <TÊN MODULE> của PFC Digital Hub trong folder mới PFC-<Tên>. Đây là triển khai đã chốt từ SRS, làm cùng kiểu Opportunity Hub: pack kiến trúc rồi code. Không hỏi lại toàn bộ kiến trúc trừ khi SRS mâu thuẫn. Không bịa business rule ngoài SRS. Bounded module trong Digital Hub, không phải sản phẩm riêng. Không payment nếu SRS không giao cho module này. Không microservice sớm. UI bám ảnh trong source/.
