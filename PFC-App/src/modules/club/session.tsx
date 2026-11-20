@@ -15,7 +15,7 @@ type ClubCtx = {
 
 const Ctx = createContext<ClubCtx | null>(null);
 
-export const CLUB_RUN_HINT = "Chạy Club: cd PFC-Management/apps/club → npm run dev (cổng 3000).";
+export const CLUB_RUN_HINT = "Máy chủ Câu lạc bộ (cổng 3000) chưa chạy hoặc đang khởi động. Trong thư mục PFC-App chạy: npm run start:all — rồi bấm Thử lại.";
 
 export async function clubPost<T = Record<string, unknown>>(action: string, body: Record<string, unknown> = {}): Promise<T> {
   return hubFetch<T>("club", "", {

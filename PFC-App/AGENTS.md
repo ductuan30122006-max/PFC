@@ -40,7 +40,9 @@ npm run build && npm start   # http://localhost:3200
 npm test
 npm run typecheck
 ```
-Opportunity and Club screens need their services running:
+**Everything at once:** `npm run start:all` (in `PFC-App`) starts Club :3000, Opportunity :3001 and PFC App :3200, warms up the hubs, and Ctrl+C stops all three. Without it, the Club / Cơ hội tabs show "Chưa kết nối được…".
+
+Opportunity and Club screens need their services running (manual alternative):
 - Club: `cd ../PFC-Management/apps/club && npm run dev:club` (:3000, demo `leader@pfc.vn` / `member@pfc.vn`, see CLUB.md)
 - Opportunity: `cd "../PFC-Opportunity Hub/web" && npm run dev` (:3001, demo accounts in its README; re-run `npm run db:seed` if every opportunity has expired)
 

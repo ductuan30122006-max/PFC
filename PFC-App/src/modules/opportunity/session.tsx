@@ -39,4 +39,4 @@ export function useOppSession(): OppSession {
   return v;
 }
 
-export const OPP_RUN_HINT = 'Chạy Opportunity Hub: cd "PFC-Opportunity Hub/web" → npm run dev (cổng 3001).';
+export const OPP_RUN_HINT = "Máy chủ Cơ hội (cổng 3001) chưa chạy hoặc đang khởi động. Trong thư mục PFC-App chạy: npm run start:all — rồi bấm Thử lại.";

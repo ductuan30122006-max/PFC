@@ -8,6 +8,11 @@ export const dynamic = "force-dynamic";
 const FORWARD_REQ_HEADERS = ["content-type", "accept", "idempotency-key"];
 const FORWARD_RES_HEADERS = ["content-type", "content-disposition"];
 const MAX_BODY = 6 * 1024 * 1024; // CV upload limit upstream is 5 MB
+/**
+ * A stopped hub fails fast (connection refused). This only bounds a hub that is up but slow,
+ * e.g. a Next dev server compiling a route for the first time (often 15–40 s on Windows).
+ */
+const HUB_TIMEOUT_MS = 60_000;
 
 type Ctx = { params: Promise<{ hub: string; path?: string[] }> };
 
@@ -28,7 +33,7 @@ async function exchange(cfg: HubConfig, member: Member): Promise<{ cookie: strin
     body: JSON.stringify({ id_token: token }),
     redirect: "manual",
     cache: "no-store",
-    signal: AbortSignal.timeout(15_000),
+    signal: AbortSignal.timeout(HUB_TIMEOUT_MS),
   });
   if (!res.ok) return null;
   for (const sc of res.headers.getSetCookie()) {
@@ -94,7 +99,7 @@ async function proxy(req: Request, ctx: Ctx): Promise<Response> {
       if (v) headers.set(h, v);
     }
     if (cookie) headers.set("cookie", cookie);
-    return fetch(target, { method: req.method, headers, body, redirect: "manual", cache: "no-store", signal: AbortSignal.timeout(15_000) });
+    return fetch(target, { method: req.method, headers, body, redirect: "manual", cache: "no-store", signal: AbortSignal.timeout(HUB_TIMEOUT_MS) });
   }
 
   let upstream: Response;

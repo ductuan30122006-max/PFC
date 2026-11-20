@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "icons": "node scripts/generate-icons.mjs",
-    "db:seed": "node --conditions=react-server --import tsx scripts/seed-demo.mts"
+    "db:seed": "node --conditions=react-server --import tsx scripts/seed-demo.mts",
+    "start:all": "node scripts/start-all.mjs"
   },
   "dependencies": {
     "@libsql/client": "^0.15.15",
