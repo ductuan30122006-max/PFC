@@ -4,10 +4,11 @@ import { X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { CATEGORIES } from "@/modules/market/domain/orders";
-import { LISTING_TYPES, type ListingType, type SellerLevel } from "@/modules/market/domain/listings";
+import { CONDITION_LABEL, LISTING_TYPES, type ListingType, type SellerLevel } from "@/modules/market/domain/listings";
 import { createListingAction, deleteListingAction, listingTransitionAction, updateListingAction } from "@/modules/market/server/actions";
 import type { ContentStatus } from "@/platform/workflow";
 import { AmountInput, Button, ButtonLink, Section } from "@/ui";
+import { AttachmentPicker } from "@/ui/AttachmentPicker";
 import { ImageUploader } from "@/ui/ImageUploader";
 import { FormError, SelectInput, TextArea, TextInput, Toggle } from "@/ui/Form";
 import { WorkflowBar } from "@/ui/WorkflowBar";
@@ -27,6 +28,14 @@ type V = {
   tags: string[];
   courseId: string;
   eventId: string;
+  itemCondition: string;
+  deliveryArea: string;
+  serviceScope: string;
+  availability: string;
+  quotation: string;
+  accessInfo: string;
+  fileUrl: string;
+  fileName: string;
 };
 type Existing = { id: string; status: ContentStatus; rejectReason: string | null; canApprove: boolean } & V;
 type Links = { courses: { id: string; title: string }[]; events: { id: string; title: string; startsAt: string }[] };
@@ -35,7 +44,7 @@ type Links = { courses: { id: string; title: string }[]; events: { id: string; t
 export function ListingEditor({ existing, links, level, limits }: { existing?: Existing; links: Links; level: SellerLevel; limits: { basicMaxPrice: number; basicMaxListings: number } }) {
   const router = useRouter();
   const [v, setV] = useState<V>(
-    existing ?? { kind: "product", category: "book", title: "", description: "", price: "", stock: "1", unlimited: false, delivery: "ship", images: [], tags: [], courseId: "", eventId: "" },
+    existing ?? { kind: "product", category: "book", title: "", description: "", price: "", stock: "1", unlimited: false, delivery: "ship", images: [], tags: [], courseId: "", eventId: "", itemCondition: "", deliveryArea: "", serviceScope: "", availability: "", quotation: "", accessInfo: "", fileUrl: "", fileName: "" },
   );
   const [tag, setTag] = useState("");
   const { run, pending, error } = useAction();
@@ -61,6 +70,14 @@ export function ListingEditor({ existing, links, level, limits }: { existing?: E
     tags: v.tags,
     courseId: v.kind === "course" ? v.courseId || null : null,
     eventId: v.kind === "ticket" ? v.eventId || null : null,
+    itemCondition: v.itemCondition,
+    deliveryArea: v.deliveryArea,
+    serviceScope: v.serviceScope,
+    availability: v.availability,
+    quotation: v.quotation,
+    accessInfo: v.accessInfo,
+    fileUrl: v.fileUrl,
+    fileName: v.fileName,
   });
 
   return (
@@ -213,6 +230,43 @@ export function ListingEditor({ existing, links, level, limits }: { existing?: E
               {!v.unlimited && <TextInput label="Số lượng trong kho" type="number" inputMode="numeric" min={0} value={v.stock} onChange={set("stock")} />}
             </>
           )}
+          {v.kind === "product" && (
+            <SelectInput label="Tình trạng" value={v.itemCondition} onChange={set("itemCondition")}>
+              <option value="">— Chọn tình trạng —</option>
+              {Object.entries(CONDITION_LABEL).map(([k, label]) => (
+                <option key={k} value={k}>
+                  {label}
+                </option>
+              ))}
+            </SelectInput>
+          )}
+          {v.kind === "service" && (
+            <>
+              <TextArea label="Phạm vi dịch vụ" value={v.serviceScope} onChange={set("serviceScope")} maxLength={1500} rows={3} placeholder="Làm những gì, không làm gì, sản phẩm bàn giao…" />
+              <TextInput label="Thời gian sẵn sàng" value={v.availability} onChange={set("availability")} maxLength={300} placeholder="vd: Tối T2–T6, cuối tuần cả ngày" />
+              <TextInput label="Cách báo giá" hint="Nếu giá thay đổi theo yêu cầu" value={v.quotation} onChange={set("quotation")} maxLength={500} placeholder="vd: Báo giá theo số trang / số giờ sau khi trao đổi" />
+            </>
+          )}
+          {v.kind === "digital" && (
+            <AttachmentPicker
+              label="Tệp giao cho người mua"
+              max={1}
+              value={v.fileUrl ? [{ url: v.fileUrl, name: v.fileName }] : []}
+              onChange={(a) => setV((x) => ({ ...x, fileUrl: a[0]?.url ?? "", fileName: a[0]?.name ?? "" }))}
+              hint="eBook, template, tài liệu (PDF, Word, Excel, PowerPoint…, tối đa 4 MB). Chỉ người đã thanh toán mới tải được."
+            />
+          )}
+          {(v.kind === "digital" || v.kind === "course") && (
+            <TextArea
+              label={v.kind === "course" ? "Hướng dẫn thêm sau thanh toán (không bắt buộc)" : "Link / hướng dẫn truy cập"}
+              value={v.accessInfo}
+              onChange={set("accessInfo")}
+              maxLength={2000}
+              rows={3}
+              placeholder={v.kind === "course" ? "vd: Tham gia nhóm Zalo của lớp tại…" : "vd: Link Google Drive, mật khẩu, cách xem online…"}
+            />
+          )}
+          {v.kind === "product" && v.delivery !== "online" && <TextInput label="Khu vực giao / nhận hàng" value={v.deliveryArea} onChange={set("deliveryArea")} maxLength={200} placeholder="vd: Cầu Giấy, Hà Nội — nhận tại cổng trường" />}
           {online ? (
             <p className="text-[13px] text-muted">{v.kind === "ticket" ? "Vé QR được cấp tự động sau khi đăng ký." : "Giao trực tuyến (gửi link / tài liệu sau khi xác nhận đơn)."}</p>
           ) : (

@@ -42,6 +42,16 @@ export function normalizeTags(raw: readonly string[]): string[] {
   return out;
 }
 
+/** Condition of a physical item (Tình trạng). */
+export const CONDITION_LABEL = { new: "Mới", like_new: "Như mới", used: "Đã qua sử dụng" } as const;
+export type Condition = keyof typeof CONDITION_LABEL;
+export const isCondition = (v: unknown): v is Condition => typeof v === "string" && v in CONDITION_LABEL;
+
+/** Digital files / access details are revealed to the buyer only once the order is paid and not cancelled. */
+export function digitalAccessOpen(o: { paymentStatus: string; status: string }): boolean {
+  return o.paymentStatus === "paid" && o.status !== "cancelled";
+}
+
 /** Delivery that makes sense for each type. */
 export function deliveryFor(kind: ListingType, delivery: "ship" | "pickup" | "online"): "ship" | "pickup" | "online" {
   return kind === "digital" || kind === "course" || kind === "ticket" ? "online" : delivery;

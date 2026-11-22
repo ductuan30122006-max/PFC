@@ -4,6 +4,7 @@ import { BadgeCheck, BookOpen, CalendarDays, Star, Store, Truck } from "lucide-r
 import { currentMember, toActor } from "@/platform/auth/session";
 import { formatVnd } from "@/lib/money";
 import { CATEGORIES, DELIVERY_LABEL, KIND_LABEL } from "@/modules/market/domain/orders";
+import { CONDITION_LABEL, type Condition } from "@/modules/market/domain/listings";
 import { getListing } from "@/modules/market/server/service";
 import { ListingThumb } from "@/modules/market/ui/ListingCard";
 import { AppHeader, Badge, ButtonLink, Card, Section } from "@/ui";
@@ -94,6 +95,29 @@ export default async function ListingPage({ params }: { params: Promise<{ id: st
       <Section title="Mô tả">
         <p className="text-[15px] leading-relaxed whitespace-pre-line text-ink-2">{l.description}</p>
       </Section>
+      {(l.itemCondition || l.deliveryArea || l.serviceScope || l.availability || l.quotation || l.kind === "digital" || l.kind === "course") && (
+        <Section title="Thông tin thêm">
+          <dl className="divide-y divide-line rounded-[var(--radius-card)] border border-line bg-surface text-[14px]">
+            {(
+              [
+                ["Tình trạng", l.itemCondition ? (CONDITION_LABEL[l.itemCondition as Condition] ?? l.itemCondition) : ""],
+                ["Khu vực giao / nhận", l.deliveryArea],
+                ["Phạm vi dịch vụ", l.serviceScope],
+                ["Thời gian sẵn sàng", l.availability],
+                ["Báo giá", l.quotation],
+                ["Sau khi thanh toán", l.kind === "digital" ? "Tải tệp hoặc xem hướng dẫn truy cập trong đơn hàng" : l.kind === "course" ? "Mở khóa học trong đơn hàng" : ""],
+              ] as const
+            )
+              .filter(([, v]) => v)
+              .map(([k, v]) => (
+                <div key={k} className="flex justify-between gap-4 px-4 py-2.5">
+                  <dt className="shrink-0 text-muted">{k}</dt>
+                  <dd className="text-right font-medium whitespace-pre-line text-ink">{v}</dd>
+                </div>
+              ))}
+          </dl>
+        </Section>
+      )}
       <Section title={`Đánh giá (${l.reviewCount})`}>
         {l.reviews.length === 0 ? (
           <p className="text-[14px] text-muted">Chưa có đánh giá. Chỉ người mua đã nhận hàng mới đánh giá được.</p>

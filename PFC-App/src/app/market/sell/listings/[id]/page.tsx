@@ -38,6 +38,14 @@ export default async function EditListingPage({ params }: { params: Promise<{ id
           tags: l.tags,
           courseId: l.courseId ?? "",
           eventId: l.eventId ?? "",
+          itemCondition: l.itemCondition,
+          deliveryArea: l.deliveryArea,
+          serviceScope: l.serviceScope,
+          availability: l.availability,
+          quotation: l.quotation,
+          accessInfo: l.access?.info ?? "",
+          fileUrl: l.access?.fileUrl ?? "",
+          fileName: l.access?.fileName ?? "",
         }}
       />
     </>

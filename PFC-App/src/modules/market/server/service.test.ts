@@ -10,7 +10,7 @@ type M = Awaited<ReturnType<typeof makeMember>>;
 let owner: M, headTT: M, seller: M, buyer: M, buyer2: M;
 let listingId: string;
 
-const LISTING = { kind: "product", category: "book", title: "Sách Tư duy tài chính", description: "Sách mới 100%, bìa mềm.", price: 189000, stock: 2, delivery: "ship" };
+const LISTING = { kind: "product", category: "book", title: "Sách Tư duy tài chính", description: "Sách mới 100%, bìa mềm.", price: 189000, stock: 2, delivery: "ship", itemCondition: "like_new", deliveryArea: "Cầu Giấy, Hà Nội", serviceScope: "Kèm 1-1 qua Zoom, bàn giao file Excel", availability: "Tối T2–T6", accessInfo: "Link tải: https://example.com/file" };
 const SHIP = { paymentMethod: "cod", recipientName: "Người Mua", recipientPhone: "0901234567", address: "123 Nguyễn Văn Cừ, Quận 1, TP.HCM" };
 
 beforeAll(async () => {
@@ -170,5 +170,30 @@ describe("listing photos", () => {
     await expect(mkt.createListing(owner, { ...LISTING, images: ["https://evil.example/x.png"] })).rejects.toThrow(/không phải của bạn/);
     await mkt.updateListing(owner, id, { ...LISTING, title: "Sách có ảnh", images: [a.url] });
     expect((await mkt.getListing(owner, id))?.images).toEqual([a.url]);
+  });
+});
+
+describe("per-type listing details", () => {
+  let seller: M;
+  beforeAll(async () => {
+    seller = await makeMember("thanh_vien", null, "Người bán chi tiết");
+    await run("UPDATE members SET email_verified_at = ? WHERE id = ?", [new Date().toISOString(), seller.id]);
+    await mkt.registerSeller(seller, { shopName: "Cửa hàng chi tiết", contact: "Zalo 0901234567" });
+  });
+  it("requires the details that fit the type and drops the ones that do not", async () => {
+    await expect(mkt.createListing(seller, { ...LISTING, itemCondition: "" })).rejects.toThrow(/tình trạng/);
+    await expect(mkt.createListing(seller, { ...LISTING, deliveryArea: "" })).rejects.toThrow(/khu vực/);
+    const id = await mkt.createListing(seller, { ...LISTING, title: "Sách cũ giá rẻ" });
+    const l = await mkt.getListing(seller, id);
+    expect(l).toMatchObject({ itemCondition: "like_new", deliveryArea: "Cầu Giấy, Hà Nội", serviceScope: "" });
+    expect(l?.access?.info).toBe("");
+  });
+
+  it("a digital item needs a file or access instructions, and the buyer only sees them once paid", async () => {
+    await expect(mkt.createListing(seller, { ...LISTING, kind: "digital", accessInfo: "" })).rejects.toThrow(/truy cập/);
+    const id = await mkt.createListing(seller, { ...LISTING, kind: "digital", title: "Template Excel quản lý chi tiêu" });
+    const pub = await mkt.getListing(buyer, id);
+    expect(pub).toBeNull(); // drafts are private to the seller
+    expect((await mkt.getListing(seller, id))?.access?.info).toContain("example.com");
   });
 });

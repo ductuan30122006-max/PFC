@@ -11,9 +11,9 @@ import { ActionError } from "@/platform/errors";
 import { can, type Actor } from "@/platform/roles";
 import { applyWorkflow, canEditContent, canViewContent, isContentStatus, type ContentStatus, type WorkflowAction } from "@/platform/workflow";
 import { MAX_AMOUNT_VND } from "@/lib/money";
-import { verifyOwnUploadUrls } from "@/platform/uploads/service";
+import { isOwnAttachment, verifyOwnUploadUrls } from "@/platform/uploads/service";
 import { getSettings } from "@/platform/settings/service";
-import { LISTING_TYPES, deliveryFor, isListingType, listingRiskCheck, normalizeTags, type ListingType, type SellerLevel } from "../domain/listings";
+import { LISTING_TYPES, deliveryFor, digitalAccessOpen, isCondition, isListingType, listingRiskCheck, normalizeTags, type ListingType, type SellerLevel } from "../domain/listings";
 import {
   CATEGORIES,
   applyOrderAction,
@@ -173,6 +173,12 @@ export type Listing = {
   eventId: string | null;
   eventTitle: string | null;
   sellerLevel: SellerLevel;
+  /** Per-type details (empty when not applicable). */
+  itemCondition: string;
+  deliveryArea: string;
+  serviceScope: string;
+  availability: string;
+  quotation: string;
 };
 
 export const MAX_LISTING_IMAGES = 6;
@@ -217,6 +223,14 @@ type ListingRow = {
   event_id: string | null;
   event_title: string | null;
   seller_level: string;
+  item_condition: string;
+  delivery_area: string;
+  service_scope: string;
+  availability: string;
+  quotation: string;
+  access_info: string;
+  file_url: string;
+  file_name: string;
 };
 const toListing = (r: ListingRow): Listing => ({
   id: r.id,
@@ -242,6 +256,11 @@ const toListing = (r: ListingRow): Listing => ({
   eventId: r.event_id,
   eventTitle: r.event_title,
   sellerLevel: r.seller_level === "verified" ? "verified" : "basic",
+  itemCondition: r.item_condition,
+  deliveryArea: r.delivery_area,
+  serviceScope: r.service_scope,
+  availability: r.availability,
+  quotation: r.quotation,
 });
 
 export async function listPublished(f: { q?: string; category?: string; kind?: string; sellerId?: string; sort?: string; tag?: string } = {}): Promise<Listing[]> {
@@ -269,6 +288,8 @@ export async function getListing(actor: Actor | null, id: string) {
   return {
     ...toListing(r),
     reviews: reviews.map((x) => ({ id: x.id, rating: Number(x.rating), comment: x.comment, createdAt: x.created_at, buyerName: x.full_name })),
+    // Private delivery details: only the seller sees them here (buyers get them from a paid order).
+    access: who.isAuthor ? { info: r.access_info, fileUrl: r.file_url, fileName: r.file_name } : null,
     isOwner: who.isAuthor,
     canApprove: who.canApprove,
     canEdit: canEditContent(statusOf(r.status), who) || (who.isAuthor && statusOf(r.status) === "published"),
@@ -290,8 +311,21 @@ const listingSchema = z
     tags: z.array(z.string().max(40)).max(20).default([]),
     courseId: z.string().nullable().optional(),
     eventId: z.string().nullable().optional(),
+    itemCondition: z.string().default(""),
+    deliveryArea: z.string().trim().max(200, "Khu vực tối đa 200 ký tự.").default(""),
+    serviceScope: z.string().trim().max(1500, "Phạm vi dịch vụ tối đa 1.500 ký tự.").default(""),
+    availability: z.string().trim().max(300, "Thời gian sẵn sàng tối đa 300 ký tự.").default(""),
+    quotation: z.string().trim().max(500, "Cách báo giá tối đa 500 ký tự.").default(""),
+    accessInfo: z.string().trim().max(2000, "Hướng dẫn truy cập tối đa 2.000 ký tự.").default(""),
+    fileUrl: z.string().trim().max(500).default(""),
+    fileName: z.string().trim().max(120).default(""),
   })
   .superRefine((v, ctx) => {
+    if (v.kind === "product" && !isCondition(v.itemCondition)) ctx.addIssue({ code: "custom", message: "Chọn tình trạng sản phẩm.", path: ["itemCondition"] });
+    if (v.kind === "product" && v.delivery !== "online" && !v.deliveryArea) ctx.addIssue({ code: "custom", message: "Nhập khu vực giao / nhận hàng.", path: ["deliveryArea"] });
+    if (v.kind === "service" && v.serviceScope.length < 10) ctx.addIssue({ code: "custom", message: "Mô tả phạm vi dịch vụ (tối thiểu 10 ký tự).", path: ["serviceScope"] });
+    if (v.kind === "service" && !v.availability && !v.quotation) ctx.addIssue({ code: "custom", message: "Nhập thời gian sẵn sàng hoặc cách báo giá.", path: ["availability"] });
+    if (v.kind === "digital" && !v.fileUrl && !v.accessInfo) ctx.addIssue({ code: "custom", message: "Đính kèm tệp hoặc nhập link / hướng dẫn truy cập cho người mua.", path: ["accessInfo"] });
     if (v.kind === "course" && !v.courseId) ctx.addIssue({ code: "custom", message: "Chọn khóa học trong Học tập để liên kết." });
     if (v.kind === "ticket" && !v.eventId) ctx.addIssue({ code: "custom", message: "Chọn sự kiện bạn tổ chức để bán vé." });
   });
@@ -333,7 +367,24 @@ async function prepareListing(actor: Actor, d: ListingInput, isNew: boolean) {
   }
   const err = listingRiskCheck(seller?.level ?? "basic", { kind: d.kind, price }, active, (await getSettings()).market, isNew);
   if (err) throw new ActionError(err, "seller_verification");
-  return { ...d, price, stock, courseId, eventId, tags: normalizeTags(d.tags), delivery: deliveryFor(d.kind, d.delivery) };
+  let fileUrl = "";
+  if (d.kind === "digital" && d.fileUrl) {
+    if (!(await isOwnAttachment(actor, d.fileUrl))) throw new ActionError("Tệp đính kèm không hợp lệ hoặc không phải của bạn.");
+    fileUrl = d.fileUrl;
+  }
+  // Keep only the details that belong to the chosen type.
+  const physical = d.kind === "product";
+  const details = {
+    itemCondition: physical ? d.itemCondition : "",
+    deliveryArea: physical ? d.deliveryArea : "",
+    serviceScope: d.kind === "service" ? d.serviceScope : "",
+    availability: d.kind === "service" ? d.availability : "",
+    quotation: d.kind === "service" ? d.quotation : "",
+    accessInfo: d.kind === "digital" || d.kind === "course" ? d.accessInfo : "",
+    fileUrl,
+    fileName: fileUrl ? d.fileName : "",
+  };
+  return { ...d, ...details, price, stock, courseId, eventId, tags: normalizeTags(d.tags), delivery: deliveryFor(d.kind, d.delivery) };
 }
 
 /** Courses / events a seller may link (their own, published). */
@@ -358,8 +409,8 @@ export async function createListing(actor: Actor, input: unknown): Promise<strin
   const images = await verifyOwnUploadUrls(actor, "listing", d.images, MAX_LISTING_IMAGES);
   const id = randomUUID();
   await run(
-    "INSERT INTO mkt_listings (id, seller_id, kind, category, title, description, price, currency, stock, delivery, images, tags, course_id, event_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'VND', ?, ?, ?, ?, ?, ?, ?, ?)",
-    [id, actor.id, d.kind, d.category, d.title, d.description, d.price, d.stock, d.delivery, JSON.stringify(images), d.tags.join(","), d.courseId, d.eventId, now(), now()],
+    "INSERT INTO mkt_listings (id, seller_id, kind, category, title, description, price, currency, stock, delivery, images, tags, course_id, event_id, item_condition, delivery_area, service_scope, availability, quotation, access_info, file_url, file_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'VND', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    [id, actor.id, d.kind, d.category, d.title, d.description, d.price, d.stock, d.delivery, JSON.stringify(images), d.tags.join(","), d.courseId, d.eventId, d.itemCondition, d.deliveryArea, d.serviceScope, d.availability, d.quotation, d.accessInfo, d.fileUrl, d.fileName, now(), now()],
   );
   return id;
 }
@@ -376,7 +427,7 @@ export async function updateListing(actor: Actor, id: string, input: unknown): P
   const d = await prepareListing(actor, listingSchema.parse(input), false);
   const images = await verifyOwnUploadUrls(actor, "listing", d.images, MAX_LISTING_IMAGES);
   const next: ContentStatus = status === "rejected" ? "draft" : status === "published" ? (can(actor, "mkt.listing.approve") ? "published" : "submitted") : status;
-  await run("UPDATE mkt_listings SET kind = ?, category = ?, title = ?, description = ?, price = ?, stock = ?, delivery = ?, images = ?, tags = ?, course_id = ?, event_id = ?, status = ?, updated_at = ? WHERE id = ?", [
+  await run("UPDATE mkt_listings SET kind = ?, category = ?, title = ?, description = ?, price = ?, stock = ?, delivery = ?, images = ?, tags = ?, course_id = ?, event_id = ?, item_condition = ?, delivery_area = ?, service_scope = ?, availability = ?, quotation = ?, access_info = ?, file_url = ?, file_name = ?, status = ?, updated_at = ? WHERE id = ?", [
     d.kind,
     d.category,
     d.title,
@@ -388,6 +439,14 @@ export async function updateListing(actor: Actor, id: string, input: unknown): P
     d.tags.join(","),
     d.courseId,
     d.eventId,
+    d.itemCondition,
+    d.deliveryArea,
+    d.serviceScope,
+    d.availability,
+    d.quotation,
+    d.accessInfo,
+    d.fileUrl,
+    d.fileName,
     next,
     now(),
     id,
@@ -618,9 +677,10 @@ export async function getOrder(actor: Actor, id: string) {
   );
   if (!o || (o.buyer_id !== actor.id && o.seller_id !== actor.id)) return null;
   const role = o.buyer_id === actor.id ? ("buyer" as const) : ("seller" as const);
-  const items = await all<{ listing_id: string; title: string; unit_price: number; qty: number; reviewed: number }>(
-    `SELECT i.listing_id, i.title, i.unit_price, i.qty, (SELECT COUNT(*) FROM mkt_reviews r WHERE r.order_id = i.order_id AND r.listing_id = i.listing_id) AS reviewed
-     FROM mkt_order_items i WHERE i.order_id = ?`,
+  const items = await all<{ listing_id: string; title: string; unit_price: number; qty: number; reviewed: number; kind: ListingType; course_id: string | null; access_info: string; file_url: string; file_name: string }>(
+    `SELECT i.listing_id, i.title, i.unit_price, i.qty, (SELECT COUNT(*) FROM mkt_reviews r WHERE r.order_id = i.order_id AND r.listing_id = i.listing_id) AS reviewed,
+       l.kind, l.course_id, l.access_info, l.file_url, l.file_name
+     FROM mkt_order_items i JOIN mkt_listings l ON l.id = i.listing_id WHERE i.order_id = ?`,
     [id],
   );
   const events = await all<{ to_status: string; note: string | null; created_at: string }>("SELECT to_status, note, created_at FROM mkt_order_events WHERE order_id = ? ORDER BY created_at", [id]);
@@ -642,7 +702,18 @@ export async function getOrder(actor: Actor, id: string) {
     buyerName: o.buyer_name,
     shopName: o.shop_name,
     sellerContact: o.contact ?? "",
-    items: items.map((i) => ({ listingId: i.listing_id, title: i.title, unitPrice: Number(i.unit_price), qty: Number(i.qty), reviewed: Number(i.reviewed) > 0 })),
+    items: items.map((i) => ({
+      listingId: i.listing_id,
+      title: i.title,
+      unitPrice: Number(i.unit_price),
+      qty: Number(i.qty),
+      reviewed: Number(i.reviewed) > 0,
+      // Digital file / access instructions / course link: the seller always, the buyer once the order is paid.
+      access:
+        (i.kind === "digital" || i.kind === "course") && (role === "seller" || digitalAccessOpen({ paymentStatus: o.payment_status, status: o.status }))
+          ? { info: i.access_info, fileUrl: i.file_url, fileName: i.file_name, courseId: i.kind === "course" ? i.course_id : null }
+          : null,
+    })),
     events: events.map((e) => ({ status: e.to_status, note: e.note, at: e.created_at })),
     actions: availableActions(state, role),
     canReview: role === "buyer" && canReview(o.status),

@@ -7,6 +7,7 @@ import { getOrder } from "@/modules/market/server/service";
 import { REFUND_STATUS_LABEL, onlinePaymentEnabled, paymentForRef, refundForRef } from "@/modules/payments/server/service";
 import { AppHeader, Badge, ButtonLink, Card, Section } from "@/ui";
 import { cx } from "@/ui/cx";
+import { AttachmentList } from "@/ui/AttachmentPicker";
 import { OrderActions, PayOrderButton, ReviewButton } from "./OrderClient";
 
 export const dynamic = "force-dynamic";
@@ -56,6 +57,28 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
           </p>
         </Card>
       </Section>
+      {o.items.some((i) => i.access) && (
+        <Section title="Nhận hàng số / truy cập">
+          <Card className="space-y-4">
+            {o.items
+              .filter((i) => i.access)
+              .map((i) => (
+                <div key={i.listingId} className="space-y-2">
+                  <p className="text-[14px] font-semibold text-ink">{i.title}</p>
+                  {i.access!.courseId && (
+                    <ButtonLink href={`/learn/courses/${i.access!.courseId}`} variant="secondary" block>
+                      Vào khóa học
+                    </ButtonLink>
+                  )}
+                  {i.access!.fileUrl && <AttachmentList items={[{ url: i.access!.fileUrl, name: i.access!.fileName || "Tệp đã mua", kind: "file" }]} />}
+                  {i.access!.info && <p className="rounded-xl bg-surface-2 px-3 py-2 text-[14px] whitespace-pre-line text-ink-2">{i.access!.info}</p>}
+                  {!i.access!.fileUrl && !i.access!.info && !i.access!.courseId && <p className="text-[13px] text-muted">Người bán sẽ gửi tài liệu cho bạn qua liên hệ của cửa hàng.</p>}
+                </div>
+              ))}
+          </Card>
+          {o.role === "buyer" && <p className="mt-2 text-[12px] text-muted">Chỉ hiện sau khi đơn được thanh toán.</p>}
+        </Section>
+      )}
       <Section title="Thanh toán & giao nhận">
         <dl className="divide-y divide-line rounded-[var(--radius-card)] border border-line bg-surface text-[14px]">
           {[
