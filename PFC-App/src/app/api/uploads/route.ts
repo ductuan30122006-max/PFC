@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { currentMember, toActor } from "@/platform/auth/session";
 import { ActionError } from "@/platform/errors";
 import { MAX_UPLOAD_BYTES } from "@/platform/uploads/image";
-import { MAX_DOCUMENT_BYTES, UPLOAD_PURPOSES, saveDocument, saveImage, type UploadPurpose } from "@/platform/uploads/service";
+import { MAX_DOCUMENT_BYTES, UPLOAD_PURPOSES, saveAttachment, saveDocument, saveImage, type UploadPurpose } from "@/platform/uploads/service";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -37,6 +37,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const buf = Buffer.from(await file.arrayBuffer());
+    if (purpose === "attachment") return json(await saveAttachment(toActor(me), buf, file.name), 201);
     const up = isDoc ? await saveDocument(toActor(me), buf) : await saveImage(toActor(me), purpose as UploadPurpose, buf);
     return json(up, 201);
   } catch (err) {

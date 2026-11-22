@@ -5,13 +5,14 @@ import { audit } from "@/platform/audit";
 import { ActionError } from "@/platform/errors";
 import { allowAttempt } from "@/platform/rate-limit";
 import type { Actor } from "@/platform/roles";
-import { ImageRejected, processImage } from "./image";
+import { cleanFileName, detectOfficeOrText, MAX_ATTACHMENT_BYTES } from "./attachment";
+import { ImageRejected, processImage, sniffImage } from "./image";
 import { putObject } from "./storage";
 
 /** Image purposes. "document" is the one non-image purpose (PDF, see saveDocument). */
-export const UPLOAD_PURPOSES = ["listing", "avatar", "post", "project", "event", "place", "club", "document"] as const;
+export const UPLOAD_PURPOSES = ["listing", "avatar", "post", "project", "event", "place", "club", "document", "attachment"] as const;
 export type UploadPurpose = (typeof UPLOAD_PURPOSES)[number];
-export type Upload = { id: string; url: string; width: number; height: number };
+export type Upload = { id: string; url: string; width: number; height: number; kind?: "image" | "file"; name?: string };
 
 /** Vercel functions accept ~4.5 MB request bodies, so documents stay under 4 MB (bigger files: share a link). */
 export const MAX_DOCUMENT_BYTES = 4 * 1024 * 1024;
@@ -53,6 +54,52 @@ export async function saveDocument(actor: Actor, input: Buffer): Promise<Upload>
 /** Is this URL one of the actor's own uploaded documents? */
 export async function isOwnDocument(actor: Actor, url: string): Promise<boolean> {
   return (await all("SELECT 1 AS x FROM uploads WHERE owner_id = ? AND purpose = 'document' AND url = ?", [actor.id, url])).length > 0;
+}
+
+/**
+ * One study / listing file: a photo (re-encoded, metadata stripped) or a PDF / Word / Excel / PowerPoint / text file
+ * checked by its bytes. Photos taken with the phone camera arrive here too. 40 files / hour / member.
+ */
+export async function saveAttachment(actor: Actor, input: Buffer, fileName: string): Promise<Upload> {
+  const name = cleanFileName(fileName);
+  if (sniffImage(input)) {
+    const up = await saveImage(actor, "attachment", input);
+    return { ...up, kind: "image", name };
+  }
+  if (!(await allowAttempt(`upload-file:${actor.id}`, 40, 60 * 60_000))) throw new ActionError("Bạn tải tệp quá nhiều. Vui lòng thử lại sau.", "rate_limited");
+  let ext: string;
+  let mime: string;
+  if (input.subarray(0, 5).toString("latin1") === "%PDF-") {
+    const err = checkPdf(input);
+    if (err) throw new ActionError(err, "invalid_document");
+    ext = "pdf";
+    mime = "application/pdf";
+  } else {
+    if (input.length > MAX_ATTACHMENT_BYTES) throw new ActionError("Tệp tối đa 4 MB. Tệp lớn hơn: dán link Google Drive.", "invalid_document");
+    const d = detectOfficeOrText(input, name);
+    if ("error" in d) throw new ActionError(d.error, "invalid_document");
+    ext = d.kind.ext;
+    mime = d.kind.mime.split(";")[0];
+  }
+  const id = randomUUID();
+  const key = `attachment/${id}.${ext}`;
+  const url = await putObject(key, input, mime);
+  await run("INSERT INTO uploads (id, owner_id, purpose, mime, bytes, width, height, storage_key, url, created_at) VALUES (?, ?, 'attachment', ?, ?, NULL, NULL, ?, ?, ?)", [
+    id,
+    actor.id,
+    mime,
+    input.length,
+    key,
+    url,
+    new Date().toISOString(),
+  ]);
+  await audit(actor.id, "upload.attachment", `upload:${id}`, "success");
+  return { id, url, width: 0, height: 0, kind: "file", name };
+}
+
+/** Is this URL one of the actor's own uploaded files (attachment or PDF document)? */
+export async function isOwnAttachment(actor: Actor, url: string): Promise<boolean> {
+  return (await all("SELECT 1 AS x FROM uploads WHERE owner_id = ? AND purpose IN ('attachment','document') AND url = ?", [actor.id, url])).length > 0;
 }
 
 /** Validates, cleans and stores one image for the signed-in member. 60 uploads / hour / member. */

@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { requireMember, toActor } from "@/platform/auth/session";
-import { getResource } from "@/modules/education/server/service";
+import { getResource, linkableQuizzes } from "@/modules/education/server/service";
 import { AppHeader } from "@/ui";
 import { ResourceForm } from "../ResourceForm";
 
@@ -14,7 +14,7 @@ export default async function EditResourcePage({ params }: { params: Promise<{ i
   return (
     <>
       <AppHeader back backFallback="/learn/manage" title="Quản lý tài liệu" />
-      <ResourceForm initial={r} />
+      <ResourceForm initial={r} quizzes={await linkableQuizzes(toActor(me))} />
     </>
   );
 }

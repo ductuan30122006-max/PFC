@@ -6,19 +6,18 @@ import { deleteContentAction, saveResourceAction, transitionAction } from "@/mod
 import type { ContentStatus } from "@/platform/workflow";
 import { Button, Section } from "@/ui";
 import { FormError, SelectInput, TextArea, TextInput } from "@/ui/Form";
-import { DocumentUploader } from "@/ui/DocumentUploader";
-import { SegmentedTabs } from "@/ui/SegmentedTabs";
+import { AttachmentPicker, type AttachmentValue } from "@/ui/AttachmentPicker";
 import { WorkflowBar } from "@/ui/WorkflowBar";
 import { useAction } from "@/ui/use-action";
 
-type R = { id?: string; title: string; kind: string; topic: string; url: string; description: string; status?: ContentStatus; rejectReason?: string | null; canEdit?: boolean; canApprove?: boolean; isAuthor?: boolean };
+type R = { id?: string; title: string; kind: string; topic: string; subject: string; url: string; description: string; quizId: string | null; attachments?: { url: string; name: string }[]; status?: ContentStatus; rejectReason?: string | null; canEdit?: boolean; canApprove?: boolean; isAuthor?: boolean };
 
-/** EDU-A01 resource editor: upload a PDF or link an https document (eBook / template / checklist / article). */
-export function ResourceForm({ initial }: { initial?: R }) {
+/** EDU-A01 resource editor: documents, exercises and notes by subject, with photos / files attached and an optional quiz. */
+export function ResourceForm({ initial, quizzes = [] }: { initial?: R; quizzes?: { id: string; title: string }[] }) {
   const router = useRouter();
-  const [v, setV] = useState<R>(initial ?? { title: "", kind: "ebook", topic: "finance", url: "", description: "" });
+  const [v, setV] = useState<R>(initial ?? { title: "", kind: "exercise", topic: "finance", subject: "", url: "", description: "", quizId: null });
+  const [files, setFiles] = useState<AttachmentValue[]>((initial?.attachments ?? []).map((a) => ({ url: a.url, name: a.name })));
   const { run, pending, error } = useAction();
-  const [source, setSource] = useState<"upload" | "link">(initial?.url && !initial.url.startsWith("/api/files/") && !initial.url.includes("/pfc/document/") ? "link" : "upload");
   const editable = !initial || initial.canEdit;
   const set = (k: keyof R) => (e: { target: { value: string } }) => setV((x) => ({ ...x, [k]: e.target.value }));
 
@@ -51,7 +50,7 @@ export function ResourceForm({ initial }: { initial?: R }) {
         onSubmit={(e) => {
           e.preventDefault();
           run(
-            () => saveResourceAction(initial?.id ?? null, { title: v.title, kind: v.kind, topic: v.topic, url: v.url, description: v.description }),
+            () => saveResourceAction(initial?.id ?? null, { title: v.title, kind: v.kind, topic: v.topic, subject: v.subject, url: v.url, description: v.description, quizId: v.quizId || null, attachments: files }),
             (id) => (initial?.id ? router.refresh() : router.replace(`/learn/manage/resources/${id}`)),
           );
         }}
@@ -60,6 +59,9 @@ export function ResourceForm({ initial }: { initial?: R }) {
           <TextInput label="Tên tài liệu" value={v.title} onChange={set("title")} maxLength={160} />
           <div className="grid grid-cols-2 gap-3">
             <SelectInput label="Loại" value={v.kind} onChange={set("kind")}>
+              <option value="exercise">Bài tập</option>
+              <option value="notes">Ghi chú / bài giảng</option>
+              <option value="exam">Đề kiểm tra</option>
               <option value="ebook">eBook</option>
               <option value="template">Template</option>
               <option value="checklist">Checklist</option>
@@ -70,27 +72,18 @@ export function ResourceForm({ initial }: { initial?: R }) {
               <option value="development">Phát triển bản thân</option>
             </SelectInput>
           </div>
-          <SegmentedTabs
-            label="Nguồn tài liệu"
-            stretch
-            value={source}
-            onChange={(s) => {
-              setSource(s);
-              setV((x) => ({ ...x, url: "" }));
-            }}
-            options={[
-              { value: "upload", label: "Tải lên PDF" },
-              { value: "link", label: "Dán link" },
-            ]}
-          />
-          {source === "upload" ? (
-            <DocumentUploader value={v.url || null} onChange={(url) => setV((x) => ({ ...x, url: url ?? "" }))} />
-          ) : (
-            <>
-              <TextInput label="Link tải / xem (https)" type="url" inputMode="url" placeholder="https://drive.google.com/…" value={v.url} onChange={set("url")} />
-              <p className="-mt-2 text-[12px] text-muted">Tệp ở Google Drive, Notion…: bật quyền xem cho mọi người có link.</p>
-            </>
-          )}
+          <TextInput label="Môn học" hint="vd: Kinh tế vi mô, Toán cao cấp, Tài chính doanh nghiệp" value={v.subject} onChange={set("subject")} maxLength={80} />
+          <AttachmentPicker value={files} onChange={setFiles} />
+          <TextInput label="Hoặc dán link tài liệu (https)" type="url" inputMode="url" placeholder="https://drive.google.com/…" value={v.url} onChange={set("url")} />
+          <p className="-mt-2 text-[12px] text-muted">Tệp lớn hơn 4 MB: để ở Google Drive, Notion… và bật quyền xem cho mọi người có link.</p>
+          <SelectInput label="Gắn bài kiểm tra" value={v.quizId ?? ""} onChange={(e) => setV((x) => ({ ...x, quizId: e.target.value || null }))}>
+            <option value="">— Không gắn —</option>
+            {quizzes.map((q) => (
+              <option key={q.id} value={q.id}>
+                {q.title}
+              </option>
+            ))}
+          </SelectInput>
           <TextArea label="Mô tả" value={v.description} onChange={set("description")} maxLength={1000} />
           <p className="text-[12px] text-muted">Chỉ đăng tài liệu bạn có quyền chia sẻ. Tài liệu được Ban Chuyên môn duyệt trước khi hiện công khai.</p>
           <FormError message={error} />

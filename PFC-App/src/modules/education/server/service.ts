@@ -1,5 +1,5 @@
 import "server-only";
-import { isOwnDocument } from "@/platform/uploads/service";
+import { isOwnAttachment, isOwnDocument } from "@/platform/uploads/service";
 import { allowAttempt } from "@/platform/rate-limit";
 import { awardPoints } from "@/modules/rewards/server/service";
 import { notify } from "@/platform/notifications/service";
@@ -18,6 +18,12 @@ import { certificateCode, courseProgress, gradeQuiz, toEmbedUrl, validateQuestio
  */
 const now = () => new Date().toISOString();
 const topic = z.enum(["finance", "development"]);
+const MAX_ATTACHMENTS = 10;
+const attachmentInput = z
+  .array(z.object({ url: z.string().trim().max(500), name: z.string().trim().max(120).default("") }))
+  .max(MAX_ATTACHMENTS, `Tối đa ${MAX_ATTACHMENTS} tệp / ảnh.`)
+  .default([]);
+
 const text = (max: number, msg: string) => z.string().trim().min(1, msg).max(max);
 const who = (actor: Actor | null, authorId: string) => ({
   isAuthor: !!actor && actor.id === authorId,
@@ -360,17 +366,18 @@ export async function certificate(actor: Actor, courseId: string) {
 
 // ───────────────────────── Quizzes ─────────────────────────
 
-export type QuizCard = { id: string; title: string; description: string; topic: Topic; status: ContentStatus; questionCount: number; passPct: number; authorName: string; timeLimitMin: number | null };
+export type QuizCard = { id: string; title: string; description: string; topic: Topic; subject: string; status: ContentStatus; questionCount: number; passPct: number; authorName: string; timeLimitMin: number | null };
 
-const QUIZ_CARD_SQL = `SELECT q.id, q.title, q.description, q.topic, q.status, q.pass_pct, q.time_limit_min, q.author_id, q.reject_reason, q.course_id, m.full_name AS author_name,
+const QUIZ_CARD_SQL = `SELECT q.id, q.title, q.description, q.topic, q.subject, q.status, q.pass_pct, q.time_limit_min, q.author_id, q.reject_reason, q.course_id, m.full_name AS author_name,
   (SELECT COUNT(*) FROM edu_questions x WHERE x.quiz_id = q.id) AS question_count
   FROM edu_quizzes q JOIN members m ON m.id = q.author_id`;
-type QuizRow = { id: string; title: string; description: string; topic: Topic; status: string; pass_pct: number; time_limit_min: number | null; author_id: string; reject_reason: string | null; course_id: string | null; author_name: string; question_count: number };
+type QuizRow = { id: string; title: string; description: string; topic: Topic; subject: string; status: string; pass_pct: number; time_limit_min: number | null; author_id: string; reject_reason: string | null; course_id: string | null; author_name: string; question_count: number };
 const toQuiz = (r: QuizRow): QuizCard => ({
   id: r.id,
   title: r.title,
   description: r.description,
   topic: r.topic,
+  subject: r.subject,
   status: statusOf(r.status),
   questionCount: Number(r.question_count),
   passPct: Number(r.pass_pct),
@@ -389,7 +396,8 @@ export async function getQuizForTaking(actor: Actor | null, id: string) {
   const q = await one<QuizRow>(`${QUIZ_CARD_SQL} WHERE q.id = ?`, [id]);
   if (!q || !canViewContent(statusOf(q.status), who(actor, q.author_id))) return null;
   const questions = await all<{ id: string; prompt: string; options_json: string }>("SELECT id, prompt, options_json FROM edu_questions WHERE quiz_id = ? ORDER BY position", [id]);
-  return { ...toQuiz(q), questions: questions.map((x) => ({ id: x.id, prompt: x.prompt, options: JSON.parse(x.options_json) as string[] })) };
+  const att = await listAttachments("quiz", [id]);
+  return { ...toQuiz(q), attachments: att.get(id) ?? [], questions: questions.map((x) => ({ id: x.id, prompt: x.prompt, options: JSON.parse(x.options_json) as string[] })) };
 }
 
 /** For the editor: full questions incl. answers; only for people who may edit. */
@@ -402,8 +410,10 @@ export async function getQuizForEditing(actor: Actor, id: string) {
     "SELECT id, prompt, options_json, correct_index, explanation, difficulty FROM edu_questions WHERE quiz_id = ? ORDER BY position",
     [id],
   );
+  const att = await listAttachments("quiz", [id]);
   return {
     ...toQuiz(q),
+    attachments: att.get(id) ?? [],
     courseId: q.course_id,
     rejectReason: q.reject_reason,
     canEdit: canEditContent(statusOf(q.status), w),
@@ -417,6 +427,8 @@ const quizSchema = z.object({
   title: text(120, "Nhập tên bài kiểm tra."),
   description: z.string().trim().max(1000).default(""),
   topic,
+  subject: z.string().trim().max(80, "Tên môn tối đa 80 ký tự.").default(""),
+  attachments: attachmentInput,
   passPct: z.coerce.number().int().min(1, "Điểm đạt 1–100%.").max(100, "Điểm đạt 1–100%."),
   timeLimitMin: z.preprocess((v) => (v === "" || v === null || v === undefined || v === 0 ? null : v), z.union([z.null(), z.coerce.number().int().min(1, "Thời gian 1–180 phút.").max(180, "Thời gian 1–180 phút.")])),
 });
@@ -425,33 +437,37 @@ export async function createQuiz(actor: Actor, input: unknown): Promise<string> 
   await requireCreator(actor);
   const d = quizSchema.parse(input);
   const id = randomUUID();
-  await run("INSERT INTO edu_quizzes (id, author_id, title, description, topic, pass_pct, time_limit_min, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", [
+  await run("INSERT INTO edu_quizzes (id, author_id, title, description, topic, subject, pass_pct, time_limit_min, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [
     id,
     actor.id,
     d.title,
     d.description,
     d.topic,
+    d.subject,
     d.passPct,
     d.timeLimitMin,
     now(),
     now(),
   ]);
+  await setAttachments(actor, "quiz", id, d.attachments);
   return id;
 }
 
 export async function updateQuiz(actor: Actor, id: string, input: unknown): Promise<void> {
   const row = await loadOwned("edu_quizzes", actor, id);
   const d = quizSchema.parse(input);
-  await run("UPDATE edu_quizzes SET title = ?, description = ?, topic = ?, pass_pct = ?, time_limit_min = ?, status = ?, updated_at = ? WHERE id = ?", [
+  await run("UPDATE edu_quizzes SET title = ?, description = ?, topic = ?, subject = ?, pass_pct = ?, time_limit_min = ?, status = ?, updated_at = ? WHERE id = ?", [
     d.title,
     d.description,
     d.topic,
+    d.subject,
     d.passPct,
     d.timeLimitMin,
     row.status === "rejected" ? "draft" : row.status,
     now(),
     id,
   ]);
+  await setAttachments(actor, "quiz", id, d.attachments);
 }
 
 const questionSchema = z.object({
@@ -579,78 +595,195 @@ export async function getAttempt(actor: Actor, attemptId: string) {
   };
 }
 
-// ───────────────────────── Resources ─────────────────────────
+// ───────────────────────── Attachments (photos & files on resources / quizzes) ─────────────────────────
 
-export type Resource = { id: string; title: string; kind: ResourceKind; topic: Topic; url: string; description: string; status: ContentStatus; authorId: string; rejectReason: string | null };
-type ResRow = { id: string; title: string; kind: ResourceKind; topic: Topic; url: string; description: string; status: string; author_id: string; reject_reason: string | null };
-const toRes = (r: ResRow): Resource => ({ id: r.id, title: r.title, kind: r.kind, topic: r.topic, url: r.url, description: r.description, status: statusOf(r.status), authorId: r.author_id, rejectReason: r.reject_reason });
+export type Attachment = { id: string; kind: "image" | "file"; url: string; name: string };
+type AttachOwner = "resource" | "quiz" | "lesson";
 
-export async function listPublishedResources(f: { topic?: string; kind?: string } = {}): Promise<Resource[]> {
-  const where = ["status = 'published'"];
-  const args: string[] = [];
-  if (f.topic === "finance" || f.topic === "development") (where.push("topic = ?"), args.push(f.topic));
-  if (f.kind && ["ebook", "template", "checklist", "article"].includes(f.kind)) (where.push("kind = ?"), args.push(f.kind));
-  return (await all<ResRow>(`SELECT * FROM edu_resources WHERE ${where.join(" AND ")} ORDER BY updated_at DESC LIMIT 200`, args)).map(toRes);
+export async function listAttachments(owner: AttachOwner, ids: string[]): Promise<Map<string, Attachment[]>> {
+  const out = new Map<string, Attachment[]>();
+  if (!ids.length) return out;
+  const rows = await all<{ id: string; owner_id: string; kind: "image" | "file"; url: string; name: string }>(
+    `SELECT id, owner_id, kind, url, name FROM edu_attachments WHERE owner_type = ? AND owner_id IN (${ids.map(() => "?").join(",")}) ORDER BY position`,
+    [owner, ...ids],
+  );
+  for (const r of rows) (out.get(r.owner_id) ?? out.set(r.owner_id, []).get(r.owner_id)!).push({ id: r.id, kind: r.kind, url: r.url, name: r.name });
+  return out;
 }
 
-const resourceSchema = z.object({
-  title: text(160, "Nhập tên tài liệu."),
-  kind: z.enum(["ebook", "template", "checklist", "article"]),
-  topic,
-  url: z
-    .string()
-    .trim()
-    .min(1, "Tải lên tệp PDF hoặc dán link tài liệu.")
-    .max(500)
-    .refine((u) => u.startsWith("https://") || /^\/api\/files\/document\/[0-9a-f-]{36}\.pdf$/.test(u), "Link phải bắt đầu bằng https:// (hoặc tải lên PDF)."),
-  description: z.string().trim().max(1000).default(""),
+/** Replaces the attachments of one item. Each URL must already be attached to it, or be the actor's own upload. */
+async function setAttachments(actor: Actor, owner: AttachOwner, ownerId: string, input: z.infer<typeof attachmentInput>): Promise<void> {
+  const current = new Set((await listAttachments(owner, [ownerId])).get(ownerId)?.map((a) => a.url));
+  const seen = new Set<string>();
+  const items: { url: string; name: string }[] = [];
+  for (const a of input) {
+    if (seen.has(a.url)) continue;
+    seen.add(a.url);
+    if (!current.has(a.url) && !(await isOwnAttachment(actor, a.url))) throw new ActionError("Tệp không hợp lệ hoặc không phải của bạn.");
+    items.push(a);
+  }
+  await run("DELETE FROM edu_attachments WHERE owner_type = ? AND owner_id = ?", [owner, ownerId]);
+  for (const [i, a] of items.entries()) {
+    await run("INSERT INTO edu_attachments (id, owner_type, owner_id, kind, url, name, position, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [
+      randomUUID(),
+      owner,
+      ownerId,
+      a.url.endsWith(".webp") ? "image" : "file",
+      a.url,
+      a.name || "tai-lieu",
+      i,
+      now(),
+    ]);
+  }
+}
+
+// ───────────────────────── Resources ─────────────────────────
+
+const RESOURCE_KINDS = ["ebook", "template", "checklist", "article", "exercise", "notes", "exam"] as const;
+export type Resource = {
+  id: string;
+  title: string;
+  kind: ResourceKind;
+  topic: Topic;
+  subject: string;
+  url: string;
+  description: string;
+  status: ContentStatus;
+  authorId: string;
+  rejectReason: string | null;
+  quizId: string | null;
+  quizTitle: string | null;
+  attachments: Attachment[];
+};
+type ResRow = { id: string; title: string; kind: ResourceKind; topic: Topic; subject: string; url: string; description: string; status: string; author_id: string; reject_reason: string | null; quiz_id: string | null; quiz_title: string | null };
+const RES_SQL = "SELECT r.*, (SELECT title FROM edu_quizzes q WHERE q.id = r.quiz_id) AS quiz_title FROM edu_resources r";
+const toRes = (r: ResRow, attachments: Attachment[]): Resource => ({
+  id: r.id,
+  title: r.title,
+  kind: r.kind,
+  topic: r.topic,
+  subject: r.subject,
+  url: r.url,
+  description: r.description,
+  status: statusOf(r.status),
+  authorId: r.author_id,
+  rejectReason: r.reject_reason,
+  quizId: r.quiz_id,
+  quizTitle: r.quiz_title,
+  attachments,
 });
+
+export async function listPublishedResources(f: { topic?: string; kind?: string; subject?: string } = {}): Promise<Resource[]> {
+  const where = ["r.status = 'published'"];
+  const args: string[] = [];
+  if (f.topic === "finance" || f.topic === "development") (where.push("r.topic = ?"), args.push(f.topic));
+  if (f.kind && (RESOURCE_KINDS as readonly string[]).includes(f.kind)) (where.push("r.kind = ?"), args.push(f.kind));
+  if (f.subject?.trim()) (where.push("r.subject = ?"), args.push(f.subject.trim()));
+  const rows = await all<ResRow>(`${RES_SQL} WHERE ${where.join(" AND ")} ORDER BY r.updated_at DESC LIMIT 200`, args);
+  const att = await listAttachments("resource", rows.map((r) => r.id));
+  return rows.map((r) => toRes(r, att.get(r.id) ?? []));
+}
+
+/** Subjects (môn) used by published documents and quizzes, for the filter chips. */
+export async function listSubjects(): Promise<string[]> {
+  const rows = await all<{ subject: string }>(
+    `SELECT subject FROM (SELECT subject FROM edu_resources WHERE status = 'published' UNION SELECT subject FROM edu_quizzes WHERE status = 'published') WHERE subject <> '' ORDER BY subject LIMIT 40`,
+  );
+  return rows.map((r) => r.subject);
+}
+
+const resourceSchema = z
+  .object({
+    title: text(160, "Nhập tên tài liệu."),
+    kind: z.enum(RESOURCE_KINDS),
+    topic,
+    subject: z.string().trim().max(80, "Tên môn tối đa 80 ký tự.").default(""),
+    url: z
+      .string()
+      .trim()
+      .max(500)
+      .default("")
+      .refine((u) => u === "" || u.startsWith("https://") || /^\/api\/files\/(document|attachment)\/[0-9a-f-]{36}\.(pdf|docx|xlsx|pptx|txt|csv)$/.test(u), "Link phải bắt đầu bằng https:// (hoặc tải lên tệp)."),
+    description: z.string().trim().max(1000).default(""),
+    quizId: z.string().trim().max(64).nullable().optional(),
+    attachments: attachmentInput,
+  })
+  .refine((v) => v.url !== "" || v.attachments.length > 0, { message: "Đính kèm ít nhất một tệp / ảnh chụp hoặc dán link tài liệu.", path: ["url"] });
 
 /** Uploaded PDFs must be the author's own upload; external links stay https. */
 async function checkResourceUrl(actor: Actor, url: string) {
+  if (!url) return;
   const ours = url.startsWith("/api/files/") || (await all("SELECT 1 AS x FROM uploads WHERE url = ?", [url])).length > 0;
-  if (ours && !(await isOwnDocument(actor, url))) throw new ActionError("Tệp tài liệu không hợp lệ hoặc không phải của bạn.");
+  if (ours && !(await isOwnDocument(actor, url)) && !(await isOwnAttachment(actor, url))) throw new ActionError("Tệp tài liệu không hợp lệ hoặc không phải của bạn.");
+}
+
+/** A resource may point to a published quiz or one of the author's own quizzes. */
+async function checkQuizLink(actor: Actor, quizId: string | null | undefined): Promise<string | null> {
+  if (!quizId) return null;
+  const q = await one<{ author_id: string; status: string }>("SELECT author_id, status FROM edu_quizzes WHERE id = ?", [quizId]);
+  if (!q || (q.status !== "published" && q.author_id !== actor.id)) throw new ActionError("Bài kiểm tra không tồn tại hoặc chưa xuất bản.");
+  return quizId;
 }
 
 export async function saveResource(actor: Actor, id: string | null, input: unknown): Promise<string> {
   const d = resourceSchema.parse(input);
   await checkResourceUrl(actor, d.url);
+  const quizId = await checkQuizLink(actor, d.quizId);
   if (id) {
     const row = await loadOwned("edu_resources", actor, id);
-    await run("UPDATE edu_resources SET title = ?, kind = ?, topic = ?, url = ?, description = ?, status = ?, updated_at = ? WHERE id = ?", [
+    await run("UPDATE edu_resources SET title = ?, kind = ?, topic = ?, subject = ?, url = ?, description = ?, quiz_id = ?, status = ?, updated_at = ? WHERE id = ?", [
       d.title,
       d.kind,
       d.topic,
+      d.subject,
       d.url,
       d.description,
+      quizId,
       row.status === "rejected" ? "draft" : row.status,
       now(),
       id,
     ]);
+    await setAttachments(actor, "resource", id, d.attachments);
     return id;
   }
   await requireCreator(actor);
   const newId = randomUUID();
-  await run("INSERT INTO edu_resources (id, author_id, title, kind, topic, url, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", [
+  await run("INSERT INTO edu_resources (id, author_id, title, kind, topic, subject, url, description, quiz_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [
     newId,
     actor.id,
     d.title,
     d.kind,
     d.topic,
+    d.subject,
     d.url,
     d.description,
+    quizId,
     now(),
     now(),
   ]);
+  await setAttachments(actor, "resource", newId, d.attachments);
   return newId;
 }
 
 export async function getResource(actor: Actor, id: string) {
-  const r = await one<ResRow>("SELECT * FROM edu_resources WHERE id = ?", [id]);
+  const r = await one<ResRow>(`${RES_SQL} WHERE r.id = ?`, [id]);
   if (!r) return null;
   const w = who(actor, r.author_id);
   if (!w.isAuthor && !w.canApprove) return null;
-  return { ...toRes(r), canEdit: canEditContent(statusOf(r.status), w), canApprove: w.canApprove, isAuthor: w.isAuthor };
+  const att = await listAttachments("resource", [id]);
+  return { ...toRes(r, att.get(id) ?? []), canEdit: canEditContent(statusOf(r.status), w), canApprove: w.canApprove, isAuthor: w.isAuthor };
+}
+
+/** Reader view of one published document (anyone may read published content). */
+export async function getPublishedResource(id: string): Promise<Resource | null> {
+  const r = await one<ResRow>(`${RES_SQL} WHERE r.id = ? AND r.status = 'published'`, [id]);
+  if (!r) return null;
+  return toRes(r, (await listAttachments("resource", [id])).get(id) ?? []);
+}
+
+/** Quizzes the member may link to a document: published ones plus their own. */
+export async function linkableQuizzes(actor: Actor): Promise<{ id: string; title: string }[]> {
+  return all<{ id: string; title: string }>("SELECT id, title FROM edu_quizzes WHERE status = 'published' OR author_id = ? ORDER BY title LIMIT 100", [actor.id]);
 }
 
 // ───────────────────── Content management ─────────────────────

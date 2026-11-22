@@ -5,7 +5,7 @@ export type Topic = "finance" | "development";
 export const TOPIC_LABEL: Record<Topic, string> = { finance: "Tài chính cá nhân", development: "Phát triển bản thân" };
 export const LEVEL_LABEL = { basic: "Cơ bản", intermediate: "Trung cấp", advanced: "Nâng cao" } as const;
 export type Level = keyof typeof LEVEL_LABEL;
-export const RESOURCE_KIND_LABEL = { ebook: "eBook", template: "Template", checklist: "Checklist", article: "Bài viết" } as const;
+export const RESOURCE_KIND_LABEL = { ebook: "eBook", template: "Template", checklist: "Checklist", article: "Bài viết", exercise: "Bài tập", notes: "Ghi chú / bài giảng", exam: "Đề kiểm tra" } as const;
 export type ResourceKind = keyof typeof RESOURCE_KIND_LABEL;
 
 /**

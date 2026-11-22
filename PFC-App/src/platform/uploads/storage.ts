@@ -11,7 +11,7 @@ import path from "node:path";
 export const storageMode = (): "blob" | "local" => (process.env.PFC_STORAGE === "blob" ? "blob" : "local");
 
 const LOCAL_DIR = () => path.resolve(process.env.PFC_UPLOAD_DIR || ".data/uploads");
-const KEY_RE = /^[a-z]+\/[0-9a-f-]{36}\.(webp|pdf)$/;
+const KEY_RE = /^[a-z]+\/[0-9a-f-]{36}\.(webp|pdf|docx|xlsx|pptx|txt|csv)$/;
 
 export function isValidKey(key: string): boolean {
   return KEY_RE.test(key);

@@ -165,3 +165,46 @@ describe("content management overview", () => {
     await expect(edu.reply(member, t, "x", "not-a-reply")).rejects.toThrow(/không còn/);
   });
 });
+
+describe("documents by subject with photos and files attached", () => {
+  const upload = async (ownerId: string, ext: string) => {
+    const { run } = await import("@/platform/db/client");
+    const id = crypto.randomUUID();
+    const url = `/api/files/attachment/${id}.${ext}`;
+    await run("INSERT INTO uploads (id, owner_id, purpose, mime, bytes, storage_key, url, created_at) VALUES (?, ?, 'attachment', 'x', 10, ?, ?, ?)", [id, ownerId, `attachment/${id}.${ext}`, url, new Date().toISOString()]);
+    return url;
+  };
+
+  it("keeps photos and files with the document, grouped by subject", async () => {
+    const photo = await upload(member.id, "webp");
+    const file = await upload(member.id, "docx");
+    const id = await edu.saveResource(member, null, {
+      title: "Bài tập chương 3",
+      kind: "exercise",
+      topic: "finance",
+      subject: "Kinh tế vi mô",
+      attachments: [
+        { url: photo, name: "trang-1.jpg" },
+        { url: file, name: "de-bai.docx" },
+      ],
+    });
+    const r = await edu.getResource(member, id);
+    expect(r?.subject).toBe("Kinh tế vi mô");
+    expect(r?.attachments.map((a) => a.kind)).toEqual(["image", "file"]);
+  });
+
+  it("refuses someone else's upload and a document with nothing attached", async () => {
+    const theirs = await upload(member2.id, "pdf");
+    await expect(edu.saveResource(member, null, { title: "Của người khác", kind: "notes", topic: "finance", attachments: [{ url: theirs, name: "x.pdf" }] })).rejects.toThrow(/không phải của bạn/);
+    await expect(edu.saveResource(member, null, { title: "Trống", kind: "notes", topic: "finance" })).rejects.toThrow(/Đính kèm/);
+  });
+
+  it("a document can be linked to a quiz, and a quiz carries extra material", async () => {
+    const file = await upload(member.id, "pdf");
+    const quizId = await edu.createQuiz(member, { title: "Kiểm tra chương 3", topic: "finance", subject: "Kinh tế vi mô", passPct: 70, attachments: [{ url: file, name: "de-cuong.pdf" }] });
+    expect((await edu.getQuizForEditing(member, quizId))?.attachments).toHaveLength(1);
+    const rid = await edu.saveResource(member, null, { title: "Ôn chương 3", kind: "notes", topic: "finance", url: "https://example.com/doc", quizId });
+    expect((await edu.getResource(member, rid))?.quizId).toBe(quizId);
+    await expect(edu.saveResource(member2, null, { title: "Gắn quiz nháp của người khác", kind: "notes", topic: "finance", url: "https://example.com/doc", quizId })).rejects.toThrow(/chưa xuất bản/);
+  });
+});

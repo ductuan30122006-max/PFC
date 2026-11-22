@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { currentMember, toActor } from "@/platform/auth/session";
 import { getQuizForTaking } from "@/modules/education/server/service";
 import { AppHeader, ButtonLink, Card, Section } from "@/ui";
+import { AttachmentList } from "@/ui/AttachmentPicker";
 import { QuizRunner } from "./QuizRunner";
 
 export const dynamic = "force-dynamic";
@@ -15,6 +16,11 @@ export default async function QuizPage({ params }: { params: Promise<{ id: strin
   return (
     <>
       <AppHeader back backFallback="/learn/quizzes" title={quiz.title} />
+      {(quiz.subject || quiz.attachments.length > 0) && (
+        <Section title={quiz.subject ? `Môn: ${quiz.subject}` : "Tài liệu kèm theo"}>
+          {quiz.attachments.length > 0 && <AttachmentList items={quiz.attachments} />}
+        </Section>
+      )}
       {!me ? (
         <Section>
           <Card className="text-center">
