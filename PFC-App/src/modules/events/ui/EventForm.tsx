@@ -8,6 +8,7 @@ import { FormError, SelectInput, TextArea, TextInput, Toggle } from "@/ui/Form";
 import { ImageUploader } from "@/ui/ImageUploader";
 import { useAction } from "@/ui/use-action";
 import { CATEGORIES, MODES, type EventCategory, type EventMode } from "../domain/events";
+import { hubFetch } from "@/platform/hub-proxy/client";
 import { createEventAction, updateEventAction } from "../server/actions";
 
 type Tk = { name: string; description: string; price: string; capacity: string };
@@ -50,7 +51,7 @@ const EMPTY: EventFormValues = {
 };
 
 /** EVT-05/06 Create / Edit Event. */
-export function EventForm({ id, initial, ticketsLocked, onlinePayments }: { id?: string; initial?: EventFormValues; ticketsLocked?: boolean; onlinePayments: boolean }) {
+export function EventForm({ id, initial, ticketsLocked, onlinePayments, forClub }: { id?: string; initial?: EventFormValues; ticketsLocked?: boolean; onlinePayments: boolean; forClub?: boolean }) {
   const router = useRouter();
   const a = useAction();
   const [v, setV] = useState<EventFormValues>(initial ?? EMPTY);
@@ -81,7 +82,17 @@ export function EventForm({ id, initial, ticketsLocked, onlinePayments }: { id?:
       onSubmit={(e) => {
         e.preventDefault();
         if (id) a.run(() => updateEventAction(id, payload()), () => router.replace(`/events/${id}`));
-        else a.run(() => createEventAction(payload()), (eid) => router.replace(`/events/${eid}`));
+        else
+          a.run(
+            () => createEventAction(payload()),
+            async (eid) => {
+              // Created from the Club: link it so it shows in Câu lạc bộ → Hoạt động → Sự kiện.
+              if (forClub) {
+                await hubFetch("club", "", { method: "POST", headers: { "idempotency-key": `pfc-link-${eid}` }, json: { action: "link_event", externalEventId: eid, label: v.title.trim() } }).catch(() => undefined);
+              }
+              router.replace(`/events/${eid}`);
+            },
+          );
       }}
     >
       <TextInput label="Tên sự kiện" value={v.title} onChange={(e) => set("title", e.target.value)} maxLength={120} />

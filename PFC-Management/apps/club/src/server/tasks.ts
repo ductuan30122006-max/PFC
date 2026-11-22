@@ -39,6 +39,7 @@ import { assertResourceInClub } from "@/lib/access";
 import { writeAudit, writeSensitiveAudit } from "@/lib/audit";
 import type { SessionUser } from "@/lib/auth";
 import { signStorageKey } from "@/platform/storage";
+import { MAX_ATTACHMENTS_PER_TASK, assertAttachment, type AttachmentInput } from "@/domain/attachment-policy";
 import { notifyUser } from "@/platform/notify";
 import { t } from "@/i18n/messages";
 import { incMetric } from "@/platform/metrics";
@@ -496,6 +497,7 @@ export function getTaskDetail(user: SessionUser, taskId: string) {
     checklist,
     comments,
     activity,
+    attachments: listTaskAttachments(user, taskId),
     scope: {
       canFilterAllTeams: scope.canFilterAllTeams,
       forcedTeamId: scope.forcedTeamId,
@@ -1395,4 +1397,58 @@ export function listChecklist(user: SessionUser, taskId: string) {
     .orderBy(asc(taskChecklistItems.sortOrder), asc(taskChecklistItems.createdAt))
     .all()
     .map(enrichChecklistItem);
+}
+
+// ───────────────────────── Task attachments (tài liệu đính kèm) ─────────────────────────
+
+export type TaskAttachment = { id: string; taskId: string; name: string; url: string; mimeType: string; sizeBytes: number; uploaderId: string; uploaderName: string | null; createdAt: number };
+
+/** Assignee (and anyone who can see the task) may read; assignee or task managers may add; uploader or managers may remove. */
+export function listTaskAttachments(user: SessionUser, taskId: string): TaskAttachment[] {
+  const task = getTaskOrThrow(taskId);
+  requireClubPermission(user, task.clubId, "view_club");
+  if (!taskVisibleToUser(task, user.id, resolveTaskScope(user, task.clubId))) {
+    throw new AppError("FORBIDDEN", "Task not visible for your role", 403);
+  }
+  return (
+    sqlite
+      .prepare(
+        `SELECT a.id, a.task_id, a.name, a.url, a.mime_type, a.size_bytes, a.uploader_id, a.created_at, m.full_name AS uploader_name
+         FROM task_attachments a LEFT JOIN members m ON m.id = a.uploader_id WHERE a.task_id = ? ORDER BY a.created_at`,
+      )
+      .all(taskId) as { id: string; task_id: string; name: string; url: string; mime_type: string; size_bytes: number; uploader_id: string; created_at: number; uploader_name: string | null }[]
+  ).map((r) => ({ id: r.id, taskId: r.task_id, name: r.name, url: r.url, mimeType: r.mime_type, sizeBytes: Number(r.size_bytes), uploaderId: r.uploader_id, uploaderName: r.uploader_name, createdAt: Number(r.created_at) }));
+}
+
+export function addTaskAttachment(user: SessionUser, taskId: string, input: AttachmentInput): string {
+  const task = getTaskOrThrow(taskId);
+  if (task.assigneeId === user.id) requireClubPermission(user, task.clubId, "view_club");
+  else requireClubPermission(user, task.clubId, "manage_tasks");
+  const a = assertAttachment(input);
+  const count = (sqlite.prepare("SELECT COUNT(*) AS n FROM task_attachments WHERE task_id = ?").get(taskId) as { n: number }).n;
+  if (count >= MAX_ATTACHMENTS_PER_TASK) throw new AppError("VALIDATION", `Tối đa ${MAX_ATTACHMENTS_PER_TASK} tệp mỗi công việc`, 422);
+  const id = nanoid();
+  sqlite
+    .prepare("INSERT INTO task_attachments (id, task_id, club_id, uploader_id, name, url, mime_type, size_bytes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    .run(id, taskId, task.clubId, user.id, a.name, a.url, a.mimeType, a.sizeBytes, Date.now());
+  // The first file also counts as proof of work, so the assignee can send the task for review.
+  if (!task.proofOfWork?.trim()) {
+    db.update(tasks).set({ proofOfWork: `link:${a.url}`, updatedAt: new Date() }).where(eq(tasks.id, taskId)).run();
+  }
+  writeAudit({ clubId: task.clubId, actorId: user.id, action: "task.attachment_add", objectType: "task", objectId: taskId });
+  return id;
+}
+
+export function removeTaskAttachment(user: SessionUser, attachmentId: string): void {
+  const row = sqlite.prepare("SELECT task_id, uploader_id, url FROM task_attachments WHERE id = ?").get(attachmentId) as { task_id: string; uploader_id: string; url: string } | undefined;
+  if (!row) throw new AppError("NOT_FOUND", "Attachment not found", 404);
+  const task = getTaskOrThrow(row.task_id);
+  if (row.uploader_id === user.id) requireClubPermission(user, task.clubId, "view_club");
+  else requireClubPermission(user, task.clubId, "manage_tasks");
+  sqlite.prepare("DELETE FROM task_attachments WHERE id = ?").run(attachmentId);
+  if (task.proofOfWork === `link:${row.url}`) {
+    const next = sqlite.prepare("SELECT url FROM task_attachments WHERE task_id = ? ORDER BY created_at LIMIT 1").get(row.task_id) as { url: string } | undefined;
+    db.update(tasks).set({ proofOfWork: next ? `link:${next.url}` : null, updatedAt: new Date() }).where(eq(tasks.id, row.task_id)).run();
+  }
+  writeAudit({ clubId: task.clubId, actorId: user.id, action: "task.attachment_remove", objectType: "task", objectId: row.task_id });
 }

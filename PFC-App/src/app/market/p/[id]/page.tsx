@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Star, Store, Truck } from "lucide-react";
+import { BadgeCheck, BookOpen, CalendarDays, Star, Store, Truck } from "lucide-react";
 import { currentMember, toActor } from "@/platform/auth/session";
 import { formatVnd } from "@/lib/money";
 import { CATEGORIES, DELIVERY_LABEL, KIND_LABEL } from "@/modules/market/domain/orders";
@@ -34,12 +34,25 @@ export default async function ListingPage({ params }: { params: Promise<{ id: st
           <ListingThumb category={l.category} size="lg" image={l.images[0]} alt={l.title} />
         )}
         <h1 className="mt-4 text-[20px] leading-tight font-extrabold text-ink">{l.title}</h1>
-        <p className="mt-1 text-[24px] font-extrabold text-primary">{l.price === 0 ? "Miễn phí" : formatVnd(l.price)}</p>
+        <p className="mt-1 text-[24px] font-extrabold text-primary">
+          {l.kind === "ticket" ? (l.price === 0 ? "Có vé miễn phí" : `Từ ${formatVnd(l.price)}`) : l.price === 0 ? "Miễn phí" : formatVnd(l.price)}
+        </p>
         <div className="mt-2 flex flex-wrap gap-2">
           <Badge>{KIND_LABEL[l.kind]}</Badge>
           <Badge tone="muted">{CATEGORIES[l.category]}</Badge>
-          {soldOut ? <Badge tone="expense">Hết hàng</Badge> : l.stock !== null ? <Badge tone="income">Còn {l.stock}</Badge> : <Badge tone="income">Còn hàng</Badge>}
+          {l.kind !== "ticket" && (soldOut ? <Badge tone="expense">Hết hàng</Badge> : l.stock !== null ? <Badge tone="income">Còn {l.stock}</Badge> : <Badge tone="income">Còn hàng</Badge>)}
         </div>
+        {l.tags.length > 0 && (
+          <ul className="mt-2 flex flex-wrap gap-1.5">
+            {l.tags.map((t) => (
+              <li key={t}>
+                <Link href={`/market?tag=${encodeURIComponent(t)}`} className="rounded-full bg-surface-2 px-2.5 py-1 text-[12px] font-semibold text-ink-2">
+                  #{t}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
         <p className="mt-3 flex items-center gap-4 text-[13px] text-muted">
           <span className="flex items-center gap-1">
             <Star size={14} className="fill-warning text-warning" /> {l.rating ?? "Chưa có"} ({l.reviewCount} đánh giá)
@@ -55,10 +68,29 @@ export default async function ListingPage({ params }: { params: Promise<{ id: st
           <span className="grid size-11 place-items-center rounded-full bg-primary-soft text-primary">
             <Store size={20} />
           </span>
-          <span className="flex-1 text-[15px] font-semibold text-ink">{l.shopName}</span>
+          <span className="flex flex-1 items-center gap-1 text-[15px] font-semibold text-ink">
+            {l.shopName}
+            {l.sellerLevel === "verified" && <BadgeCheck size={16} className="text-primary" aria-label="Cửa hàng đã xác minh" />}
+          </span>
           <span className="text-[13px] font-semibold text-primary">Xem cửa hàng</span>
         </Link>
       </Section>
+      {(l.courseId || l.eventId) && (
+        <Section>
+          {l.courseId && (
+            <Link href={`/learn/courses/${l.courseId}`} className="pressable flex items-center gap-3 rounded-2xl border border-line bg-surface p-3">
+              <BookOpen size={20} className="text-primary" />
+              <span className="flex-1 text-[14px] text-ink">Khóa học: <b>{l.courseTitle}</b></span>
+            </Link>
+          )}
+          {l.eventId && (
+            <Link href={`/events/${l.eventId}`} className="pressable flex items-center gap-3 rounded-2xl border border-line bg-surface p-3">
+              <CalendarDays size={20} className="text-primary" />
+              <span className="flex-1 text-[14px] text-ink">Sự kiện: <b>{l.eventTitle}</b></span>
+            </Link>
+          )}
+        </Section>
+      )}
       <Section title="Mô tả">
         <p className="text-[15px] leading-relaxed whitespace-pre-line text-ink-2">{l.description}</p>
       </Section>
@@ -92,7 +124,16 @@ export default async function ListingPage({ params }: { params: Promise<{ id: st
           </ButtonLink>
         </Section>
       ) : (
-        l.status === "published" && <BuyBar listingId={l.id} soldOut={soldOut} maxQty={l.stock ?? 99} favorite={l.favorite} signedIn={!!me} />
+        l.status === "published" &&
+        (l.kind === "ticket" && l.eventId ? (
+          <Section>
+            <ButtonLink href={`/events/${l.eventId}/register`} block>
+              Mua vé tại trang sự kiện
+            </ButtonLink>
+          </Section>
+        ) : (
+          <BuyBar listingId={l.id} soldOut={soldOut} maxQty={l.stock ?? 99} favorite={l.favorite} signedIn={!!me} />
+        ))
       )}
     </>
   );

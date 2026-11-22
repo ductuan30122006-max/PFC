@@ -1,4 +1,7 @@
 import "server-only";
+import { isOwnDocument } from "@/platform/uploads/service";
+import { allowAttempt } from "@/platform/rate-limit";
+import { awardPoints } from "@/modules/rewards/server/service";
 import { notify } from "@/platform/notifications/service";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -22,9 +25,14 @@ const who = (actor: Actor | null, authorId: string) => ({
 });
 const statusOf = (s: unknown): ContentStatus => (isContentStatus(s) ? s : "draft");
 
-function requireCreator(actor: Actor) {
-  if (!can(actor, "edu.content.create")) {
-    throw new ActionError("Chỉ Chủ nhiệm, Ban điều hành và Trưởng ban Chuyên môn được tạo nội dung học tập.");
+/**
+ * Every member may contribute courses, quizzes and documents (they stay drafts until an approver publishes them).
+ * Members without edu.content.create are limited to 10 new items a day (anti-spam).
+ */
+async function requireCreator(actor: Actor) {
+  if (actor.locked) throw new ActionError("Tài khoản đang bị khóa.");
+  if (!can(actor, "edu.content.create") && !(await allowAttempt(`edu-create:${actor.id}`, 10, 24 * 3600_000))) {
+    throw new ActionError("Bạn đã tạo nhiều nội dung hôm nay. Hãy hoàn thiện và gửi duyệt các bản nháp trước.", "rate_limited");
   }
 }
 
@@ -129,7 +137,7 @@ const courseSchema = z.object({
 });
 
 export async function createCourse(actor: Actor, input: unknown): Promise<string> {
-  requireCreator(actor);
+  await requireCreator(actor);
   const d = courseSchema.parse(input);
   const id = randomUUID();
   await run(
@@ -310,7 +318,8 @@ export async function completeLesson(actor: Actor, lessonId: string): Promise<{ 
   );
   const { completed } = courseProgress(Number(counts?.total), Number(counts?.done));
   if (completed) {
-    await run("UPDATE edu_enrollments SET completed_at = COALESCE(completed_at, ?) WHERE member_id = ? AND course_id = ?", [now(), actor.id, l.course_id]);
+    const first = await run("UPDATE edu_enrollments SET completed_at = ? WHERE member_id = ? AND course_id = ? AND completed_at IS NULL", [now(), actor.id, l.course_id]);
+    if (first) await awardPoints(actor.id, "course_complete", l.course_id);
   }
   return { courseCompleted: completed };
 }
@@ -351,12 +360,12 @@ export async function certificate(actor: Actor, courseId: string) {
 
 // ───────────────────────── Quizzes ─────────────────────────
 
-export type QuizCard = { id: string; title: string; description: string; topic: Topic; status: ContentStatus; questionCount: number; passPct: number; authorName: string };
+export type QuizCard = { id: string; title: string; description: string; topic: Topic; status: ContentStatus; questionCount: number; passPct: number; authorName: string; timeLimitMin: number | null };
 
-const QUIZ_CARD_SQL = `SELECT q.id, q.title, q.description, q.topic, q.status, q.pass_pct, q.author_id, q.reject_reason, q.course_id, m.full_name AS author_name,
+const QUIZ_CARD_SQL = `SELECT q.id, q.title, q.description, q.topic, q.status, q.pass_pct, q.time_limit_min, q.author_id, q.reject_reason, q.course_id, m.full_name AS author_name,
   (SELECT COUNT(*) FROM edu_questions x WHERE x.quiz_id = q.id) AS question_count
   FROM edu_quizzes q JOIN members m ON m.id = q.author_id`;
-type QuizRow = { id: string; title: string; description: string; topic: Topic; status: string; pass_pct: number; author_id: string; reject_reason: string | null; course_id: string | null; author_name: string; question_count: number };
+type QuizRow = { id: string; title: string; description: string; topic: Topic; status: string; pass_pct: number; time_limit_min: number | null; author_id: string; reject_reason: string | null; course_id: string | null; author_name: string; question_count: number };
 const toQuiz = (r: QuizRow): QuizCard => ({
   id: r.id,
   title: r.title,
@@ -366,6 +375,7 @@ const toQuiz = (r: QuizRow): QuizCard => ({
   questionCount: Number(r.question_count),
   passPct: Number(r.pass_pct),
   authorName: r.author_name,
+  timeLimitMin: r.time_limit_min === null ? null : Number(r.time_limit_min),
 });
 
 export async function listPublishedQuizzes(f: { topic?: string } = {}): Promise<QuizCard[]> {
@@ -408,19 +418,21 @@ const quizSchema = z.object({
   description: z.string().trim().max(1000).default(""),
   topic,
   passPct: z.coerce.number().int().min(1, "Điểm đạt 1–100%.").max(100, "Điểm đạt 1–100%."),
+  timeLimitMin: z.preprocess((v) => (v === "" || v === null || v === undefined || v === 0 ? null : v), z.union([z.null(), z.coerce.number().int().min(1, "Thời gian 1–180 phút.").max(180, "Thời gian 1–180 phút.")])),
 });
 
 export async function createQuiz(actor: Actor, input: unknown): Promise<string> {
-  requireCreator(actor);
+  await requireCreator(actor);
   const d = quizSchema.parse(input);
   const id = randomUUID();
-  await run("INSERT INTO edu_quizzes (id, author_id, title, description, topic, pass_pct, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [
+  await run("INSERT INTO edu_quizzes (id, author_id, title, description, topic, pass_pct, time_limit_min, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", [
     id,
     actor.id,
     d.title,
     d.description,
     d.topic,
     d.passPct,
+    d.timeLimitMin,
     now(),
     now(),
   ]);
@@ -430,11 +442,12 @@ export async function createQuiz(actor: Actor, input: unknown): Promise<string> 
 export async function updateQuiz(actor: Actor, id: string, input: unknown): Promise<void> {
   const row = await loadOwned("edu_quizzes", actor, id);
   const d = quizSchema.parse(input);
-  await run("UPDATE edu_quizzes SET title = ?, description = ?, topic = ?, pass_pct = ?, status = ?, updated_at = ? WHERE id = ?", [
+  await run("UPDATE edu_quizzes SET title = ?, description = ?, topic = ?, pass_pct = ?, time_limit_min = ?, status = ?, updated_at = ? WHERE id = ?", [
     d.title,
     d.description,
     d.topic,
     d.passPct,
+    d.timeLimitMin,
     row.status === "rejected" ? "draft" : row.status,
     now(),
     id,
@@ -488,9 +501,31 @@ export async function deleteQuestion(actor: Actor, quizId: string, questionId: s
   await run("DELETE FROM edu_questions WHERE id = ? AND quiz_id = ?", [questionId, quizId]);
 }
 
-export async function submitAttempt(actor: Actor, quizId: string, answers: unknown): Promise<string> {
-  const q = await one<{ status: string; pass_pct: number }>("SELECT status, pass_pct FROM edu_quizzes WHERE id = ?", [quizId]);
+/** Timed quizzes: the clock starts on the server; pressing "Bắt đầu" again restarts it. */
+export async function startAttempt(actor: Actor, quizId: string): Promise<{ deadline: string | null }> {
+  const q = await one<{ status: string; time_limit_min: number | null }>("SELECT status, time_limit_min FROM edu_quizzes WHERE id = ?", [quizId]);
   if (!q || q.status !== "published") throw new ActionError("Bài kiểm tra không tồn tại hoặc chưa mở.");
+  if (q.time_limit_min === null) return { deadline: null };
+  const t = new Date();
+  await run("INSERT INTO edu_attempt_starts (quiz_id, member_id, started_at) VALUES (?, ?, ?) ON CONFLICT(quiz_id, member_id) DO UPDATE SET started_at = excluded.started_at", [quizId, actor.id, t.toISOString()]);
+  return { deadline: new Date(t.getTime() + Number(q.time_limit_min) * 60_000).toISOString() };
+}
+
+/** Grace for network delay when the timer auto-submits. */
+export const QUIZ_GRACE_MS = 60_000;
+
+export async function submitAttempt(actor: Actor, quizId: string, answers: unknown): Promise<string> {
+  const q = await one<{ status: string; pass_pct: number; time_limit_min: number | null }>("SELECT status, pass_pct, time_limit_min FROM edu_quizzes WHERE id = ?", [quizId]);
+  if (!q || q.status !== "published") throw new ActionError("Bài kiểm tra không tồn tại hoặc chưa mở.");
+  if (q.time_limit_min !== null) {
+    const s = await one<{ started_at: string }>("SELECT started_at FROM edu_attempt_starts WHERE quiz_id = ? AND member_id = ?", [quizId, actor.id]);
+    if (!s) throw new ActionError("Bấm “Bắt đầu” để tính giờ trước khi làm bài.");
+    if (Date.now() > Date.parse(s.started_at) + Number(q.time_limit_min) * 60_000 + QUIZ_GRACE_MS) {
+      await run("DELETE FROM edu_attempt_starts WHERE quiz_id = ? AND member_id = ?", [quizId, actor.id]);
+      throw new ActionError("Đã hết giờ làm bài. Bấm “Bắt đầu” để làm lại.");
+    }
+    await run("DELETE FROM edu_attempt_starts WHERE quiz_id = ? AND member_id = ?", [quizId, actor.id]);
+  }
   const questions = await all<{ id: string; correct_index: number; options_json: string }>("SELECT id, correct_index, options_json FROM edu_questions WHERE quiz_id = ? ORDER BY position", [quizId]);
   const a = answers && typeof answers === "object" ? (answers as Record<string, unknown>) : {};
   const r = gradeQuiz(
@@ -509,6 +544,7 @@ export async function submitAttempt(actor: Actor, quizId: string, answers: unkno
     r.passed ? 1 : 0,
     now(),
   ]);
+  if (r.passed) await awardPoints(actor.id, "quiz_pass", quizId);
   return id;
 }
 
@@ -564,13 +600,21 @@ const resourceSchema = z.object({
   url: z
     .string()
     .trim()
-    .url("Link không hợp lệ.")
-    .refine((u) => u.startsWith("https://"), "Link phải bắt đầu bằng https://"),
+    .min(1, "Tải lên tệp PDF hoặc dán link tài liệu.")
+    .max(500)
+    .refine((u) => u.startsWith("https://") || /^\/api\/files\/document\/[0-9a-f-]{36}\.pdf$/.test(u), "Link phải bắt đầu bằng https:// (hoặc tải lên PDF)."),
   description: z.string().trim().max(1000).default(""),
 });
 
+/** Uploaded PDFs must be the author's own upload; external links stay https. */
+async function checkResourceUrl(actor: Actor, url: string) {
+  const ours = url.startsWith("/api/files/") || (await all("SELECT 1 AS x FROM uploads WHERE url = ?", [url])).length > 0;
+  if (ours && !(await isOwnDocument(actor, url))) throw new ActionError("Tệp tài liệu không hợp lệ hoặc không phải của bạn.");
+}
+
 export async function saveResource(actor: Actor, id: string | null, input: unknown): Promise<string> {
   const d = resourceSchema.parse(input);
+  await checkResourceUrl(actor, d.url);
   if (id) {
     const row = await loadOwned("edu_resources", actor, id);
     await run("UPDATE edu_resources SET title = ?, kind = ?, topic = ?, url = ?, description = ?, status = ?, updated_at = ? WHERE id = ?", [
@@ -585,7 +629,7 @@ export async function saveResource(actor: Actor, id: string | null, input: unkno
     ]);
     return id;
   }
-  requireCreator(actor);
+  await requireCreator(actor);
   const newId = randomUUID();
   await run("INSERT INTO edu_resources (id, author_id, title, kind, topic, url, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", [
     newId,
@@ -614,9 +658,8 @@ export async function getResource(actor: Actor, id: string) {
 export type ManagedItem = { kind: "course" | "quiz" | "resource"; id: string; title: string; status: ContentStatus; authorName: string; updatedAt: string; rejectReason: string | null };
 
 export async function manageOverview(actor: Actor) {
-  const canCreate = can(actor, "edu.content.create");
+  const canCreate = !actor.locked; // every member contributes; approval still required
   const canApprove = can(actor, "edu.content.approve");
-  if (!canCreate && !canApprove) return { mine: [], queue: [], canCreate, canApprove };
   const mine = await all<{ kind: ManagedItem["kind"]; id: string; title: string; status: string; author_name: string; updated_at: string; reject_reason: string | null }>(
     `SELECT 'course' AS kind, c.id, c.title, c.status, m.full_name AS author_name, c.updated_at AS updated_at, c.reject_reason FROM edu_courses c JOIN members m ON m.id = c.author_id WHERE c.author_id = ?
      UNION ALL SELECT 'quiz', q.id, q.title, q.status, m.full_name, q.updated_at, q.reject_reason FROM edu_quizzes q JOIN members m ON m.id = q.author_id WHERE q.author_id = ?
@@ -666,8 +709,8 @@ export async function getThread(actor: Actor | null, id: string) {
   const mod = can(actor, "edu.forum.moderate");
   const isAuthor = !!actor && actor.id === t.author_id;
   if (Number(t.hidden) === 1 && !mod && !isAuthor) return null;
-  const replies = await all<{ id: string; author_id: string; body: string; hidden: number; created_at: string; author_name: string }>(
-    `SELECT r.id, r.author_id, r.body, r.hidden, r.created_at, m.full_name AS author_name FROM edu_replies r JOIN members m ON m.id = r.author_id
+  const replies = await all<{ id: string; author_id: string; body: string; hidden: number; created_at: string; author_name: string; parent_id: string | null }>(
+    `SELECT r.id, r.author_id, r.body, r.hidden, r.created_at, r.parent_id, m.full_name AS author_name FROM edu_replies r JOIN members m ON m.id = r.author_id
      WHERE r.thread_id = ? ${mod ? "" : "AND (r.hidden = 0 OR r.author_id = ?)"} ORDER BY r.created_at`,
     mod ? [id] : [id, actor?.id ?? ""],
   );
@@ -685,7 +728,7 @@ export async function getThread(actor: Actor | null, id: string) {
     canModerate: mod,
     likes: Number(likes?.n ?? 0),
     liked: Number(likes?.mine ?? 0) > 0,
-    replies: replies.map((r) => ({ id: r.id, body: r.body, hidden: Number(r.hidden) === 1, createdAt: r.created_at, authorName: r.author_name, isAuthor: !!actor && actor.id === r.author_id })),
+    replies: replies.map((r) => ({ id: r.id, parentId: r.parent_id, body: r.body, hidden: Number(r.hidden) === 1, createdAt: r.created_at, authorName: r.author_name, isAuthor: !!actor && actor.id === r.author_id })),
   };
 }
 
@@ -702,17 +745,30 @@ export async function createThread(actor: Actor, input: unknown): Promise<string
   return id;
 }
 
-export async function reply(actor: Actor, threadId: string, body: unknown): Promise<void> {
+export async function reply(actor: Actor, threadId: string, body: unknown, parentId?: string | null): Promise<void> {
   const b = z.string().trim().min(1, "Nhập nội dung trả lời.").max(5000).parse(body);
+  let parent: { id: string; author_id: string } | null = null;
+  if (parentId) {
+    const p = await one<{ id: string; author_id: string; parent_id: string | null; hidden: number }>("SELECT id, author_id, parent_id, hidden FROM edu_replies WHERE id = ? AND thread_id = ?", [parentId, threadId]);
+    if (!p || Number(p.hidden) === 1) throw new ActionError("Bình luận gốc không còn.");
+    // One level of nesting: answering a reply attaches to its top-level comment.
+    parent = p.parent_id ? await one<{ id: string; author_id: string }>("SELECT id, author_id FROM edu_replies WHERE id = ?", [p.parent_id]) : { id: p.id, author_id: p.author_id };
+    if (p.parent_id && p.author_id !== parent?.author_id && p.author_id !== actor.id) {
+      await notify(p.author_id, { category: "learn", title: "Có người trả lời bình luận của bạn", body: b.slice(0, 120), href: `/learn/forum/${threadId}` });
+    }
+  }
   const t = await one<{ hidden: number; locked: number; author_id: string; title: string }>("SELECT hidden, locked, author_id, title FROM edu_threads WHERE id = ?", [threadId]);
   if (!t || Number(t.hidden) === 1) throw new ActionError("Không tìm thấy chủ đề.");
   if (Number(t.locked) === 1) throw new ActionError("Chủ đề đã bị khóa bình luận.");
   await tx([
-    { sql: "INSERT INTO edu_replies (id, thread_id, author_id, body, created_at) VALUES (?, ?, ?, ?, ?)", args: [randomUUID(), threadId, actor.id, b, now()] },
+    { sql: "INSERT INTO edu_replies (id, thread_id, author_id, body, parent_id, created_at) VALUES (?, ?, ?, ?, ?, ?)", args: [randomUUID(), threadId, actor.id, b, parent?.id ?? null, now()] },
     { sql: "UPDATE edu_threads SET last_activity_at = ? WHERE id = ?", args: [now(), threadId] },
   ]);
   if (t.author_id !== actor.id) {
     await notify(t.author_id, { category: "learn", title: "Có trả lời mới trong chủ đề của bạn", body: t.title.slice(0, 120), href: `/learn/forum/${threadId}` });
+  }
+  if (parent && parent.author_id !== actor.id && parent.author_id !== t.author_id) {
+    await notify(parent.author_id, { category: "learn", title: "Có người trả lời bình luận của bạn", body: b.slice(0, 120), href: `/learn/forum/${threadId}` });
   }
 }
 

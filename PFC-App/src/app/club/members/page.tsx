@@ -6,6 +6,7 @@ import { useMemo, useState } from "react";
 import { useClub } from "@/modules/club/session";
 import { MEMBERSHIP_LABEL, POSITION_LABEL, type Position } from "@/modules/club/types";
 import { Avatar } from "@/modules/club/ui/Avatar";
+import { PendingRequests } from "@/modules/club/ui/PendingRequests";
 import { AppHeader, Badge, BottomSheet, Button, EmptyState, HeaderIconButton } from "@/ui";
 import { FormError, SelectInput, TextInput } from "@/ui/Form";
 import { cx } from "@/ui/cx";
@@ -24,7 +25,8 @@ export default function ClubMembersPage() {
     const needle = q.trim().toLowerCase();
     return home.members
       .filter((m) => (canManage ? m.status !== "rejected" : m.status === "active"))
-      .filter((m) => team === "all" || (team === "pending" ? m.status === "pending" : m.teamId === team))
+      // Pending requests have their own block above the list (with Duyệt / Từ chối), except in the "Chờ duyệt" filter.
+      .filter((m) => (team === "pending" ? m.status === "pending" : m.status !== "pending" && (team === "all" || m.teamId === team)))
       .filter((m) => !needle || `${m.fullName} ${m.email} ${m.studentCode ?? ""}`.toLowerCase().includes(needle))
       .sort((a, b) => (a.status === "pending" ? -1 : 0) - (b.status === "pending" ? -1 : 0));
   }, [home.members, q, team, canManage]);
@@ -79,6 +81,7 @@ export default function ClubMembersPage() {
         </div>
       </div>
 
+      {team !== "pending" && !q && <PendingRequests />}
       {list.length === 0 ? (
         <EmptyState icon={Users} title="Không tìm thấy thành viên" />
       ) : (

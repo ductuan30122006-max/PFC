@@ -162,3 +162,16 @@ Quyết định: [ADR-005](../PFC-Opportunity%20Hub/adrs/ADR-005-turso-libsql-se
 ## 10. Cập nhật về sau
 
 Đẩy code lên nhánh chính → Vercel tự deploy. CI (`.github/workflows/pfc-app.yml`) chạy typecheck, test và build cho mọi thay đổi trong `PFC-App/`. Migration mới tự chạy ở request đầu tiên sau deploy — tạo bản sao Turso trước (mục 2).
+
+## 11. Sao lưu & khôi phục
+
+- **Turso** tự giữ bản khôi phục theo thời điểm (point-in-time) trong thời hạn của gói đang dùng. Khôi phục: `turso db create pfc-restore --from-db pfc --timestamp 2026-11-20T10:00:00Z`, kiểm tra dữ liệu, rồi trỏ `PFC_DB_URL` / `PFC_DB_AUTH_TOKEN` sang database mới và Redeploy.
+- **Trước mỗi lần deploy có migration mới**, tạo bản sao: `turso db create pfc-backup-$(date +%Y%m%d) --from-db pfc`.
+- **Ảnh tải lên** nằm ở Vercel Blob, không bị ảnh hưởng khi khôi phục database (ảnh mồ côi không gây lỗi).
+- Bảng điều khiển **Quản trị** (`/admin`) hiện tình trạng database và cấu hình; `/api/health` cho kết quả dạng JSON để gắn công cụ giám sát.
+
+## 12. Cấu hình sau khi chạy thật (Quản trị → Cấu hình, chỉ Chủ nhiệm)
+
+- **Bật / tắt tính năng:** Cộng đồng, Tin nhắn, Sự kiện, Ngon – Bổ – Rẻ, Tìm cộng sự, Điểm thưởng — tắt là ẩn ngay cho mọi người, dữ liệu giữ nguyên.
+- **Điểm thưởng & hạng:** app có sẵn mức điểm và mốc hạng *đề xuất* (trang Cấu hình có dòng nhắc vàng tới khi bấm Lưu). PFC cần chốt lại trước khi công bố.
+- **Quà tặng:** Quản trị → Quà tặng & đổi điểm. Chỉ thêm quà / đối tác đã thỏa thuận thật.

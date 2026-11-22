@@ -33,7 +33,7 @@ export default async function QuizPage({ params }: { params: Promise<{ id: strin
           <Card className="text-center text-[14px] text-muted">Bài kiểm tra chưa có câu hỏi.</Card>
         </Section>
       ) : (
-        <QuizRunner quizId={quiz.id} questions={quiz.questions} passPct={quiz.passPct} />
+        <QuizRunner quizId={quiz.id} questions={quiz.questions} passPct={quiz.passPct} timeLimitMin={quiz.timeLimitMin} />
       )}
     </>
   );

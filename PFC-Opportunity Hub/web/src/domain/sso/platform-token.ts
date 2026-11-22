@@ -4,7 +4,8 @@ import { createHmac, timingSafeEqual } from "node:crypto";
  * Verifies a PFC Platform (PFC App) HS256 id_token for Opportunity Hub.
  * Pure: secret and clock are passed in. Returns null on any failure (fail closed).
  */
-export type PlatformClaims = { sub: string; email: string; name: string };
+/** pfcRole / pfcDepartment: the member's PFC platform role, used to grant posting / review rights (platform-grant.ts). */
+export type PlatformClaims = { sub: string; email: string; name: string; pfcRole: string | null; pfcDepartment: string | null };
 
 export const OPP_AUDIENCE = "pfc-opportunity";
 export const PLATFORM_ISSUER = "pfc-platform";
@@ -34,5 +35,6 @@ export function verifyPlatformToken(token: string, secret: string, nowSec: numbe
   const sub = typeof claims.sub === "string" ? claims.sub : "";
   const name = typeof claims.name === "string" && claims.name.trim() ? claims.name.trim() : email;
   if (!sub || !/^[^@\s]+@[^@\s]+$/.test(email)) return null;
-  return { sub, email, name: name.slice(0, 120) };
+  const str = (v: unknown) => (typeof v === "string" && /^[a-z_]{2,30}$/.test(v) ? v : null);
+  return { sub, email, name: name.slice(0, 120), pfcRole: str(claims.pfc_role), pfcDepartment: str(claims.pfc_department) };
 }

@@ -8,7 +8,7 @@ import { MEMBERSHIP_LABEL, MEMBERSHIP_NEXT, POSITION_LABEL, fmtDate, type Member
 import { Avatar } from "@/modules/club/ui/Avatar";
 import { AppHeader, Badge, Button, Card, EmptyState, Section } from "@/ui";
 import { ConfirmSheet } from "@/ui/ConfirmSheet";
-import { FormError, SelectInput } from "@/ui/Form";
+import { FormError, SelectInput, TextArea } from "@/ui/Form";
 
 const TRANSITION_LABEL: Partial<Record<MembershipStatus, string>> = {
   active: "Kích hoạt",
@@ -27,6 +27,8 @@ export default function ClubMemberPage() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<MembershipStatus | null>(null);
+  const [kicking, setKicking] = useState(false);
+  const [kickReason, setKickReason] = useState("");
 
   if (!m) {
     return (
@@ -145,6 +147,36 @@ export default function ClubMemberPage() {
           </div>
         </Section>
       )}
+      {canManage && !isMe && m.position !== "owner" && (m.status === "active" || m.status === "inactive") && (
+        <Section title="Xóa khỏi CLB">
+          {kicking ? (
+            <div className="space-y-2">
+              <TextArea label="Lý do (tối thiểu 8 ký tự, lưu vào lịch sử thành viên)" value={kickReason} onChange={(e) => setKickReason(e.target.value)} maxLength={300} />
+              <div className="grid grid-cols-2 gap-2">
+                <Button variant="secondary" className="min-h-10 text-[14px]" onClick={() => (setKicking(false), setKickReason(""))}>
+                  Thôi
+                </Button>
+                <Button
+                  variant="danger"
+                  className="min-h-10 text-[14px]"
+                  disabled={busy || kickReason.trim().length < 8}
+                  onClick={async () => {
+                    if (await run("kick_member", { membershipId: m.id, note: kickReason.trim() })) router.replace("/club/members");
+                  }}
+                >
+                  Xóa khỏi CLB
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <Button variant="ghost" className="min-h-10 text-[14px] text-expense" onClick={() => setKicking(true)}>
+              Xóa {m.fullName} khỏi CLB
+            </Button>
+          )}
+          <p className="mt-1 text-[12px] text-muted">Thành viên mất quyền xem nội dung CLB; công việc đã làm vẫn được giữ lại.</p>
+        </Section>
+      )}
+
       {err && (
         <div className="px-4 pt-3">
           <FormError message={err} />

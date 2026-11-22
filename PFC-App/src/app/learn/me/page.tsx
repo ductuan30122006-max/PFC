@@ -1,7 +1,7 @@
 import Link from "next/link";
-import { Award, BookOpen, ClipboardCheck, Clock, PenSquare } from "lucide-react";
+import { Award, BookOpen, ClipboardCheck, Clock, Medal, PenSquare } from "lucide-react";
+import { badgesFor } from "@/modules/education/domain/badges";
 import { requireMember, toActor } from "@/platform/auth/session";
-import { can } from "@/platform/roles";
 import { myLearning } from "@/modules/education/server/service";
 import { CourseCard } from "@/modules/education/ui/CourseCard";
 import { AppHeader, Badge, ButtonLink, Card, EmptyState, ListGroup, ListItem, Section } from "@/ui";
@@ -16,7 +16,7 @@ export default async function MyLearningPage() {
   const { courses, attempts, stats } = await myLearning(actor);
   const done = courses.filter((c) => c.completedAt);
   const active = courses.filter((c) => !c.completedAt);
-  const canManage = can(actor, "edu.content.create") || can(actor, "edu.content.approve");
+  const canManage = !actor.locked; // every member may contribute content (reviewed before publishing)
 
   return (
     <>
@@ -38,10 +38,22 @@ export default async function MyLearningPage() {
         </div>
       </Section>
 
+      <Section title="Huy hiệu">
+        <ul className="grid grid-cols-3 gap-2">
+          {badgesFor(stats).map((b) => (
+            <li key={b.key} className={`rounded-2xl border p-3 text-center ${b.earned ? "border-primary bg-primary-soft" : "border-line bg-surface"}`}>
+              <Medal size={26} className={`mx-auto ${b.earned ? "text-primary" : "text-line"}`} aria-hidden="true" />
+              <p className={`mt-1 text-[13px] font-bold ${b.earned ? "text-ink" : "text-muted"}`}>{b.label}</p>
+              <p className="text-[11px] leading-tight text-muted">{b.earned ? b.description : `${Math.round(b.progress * 100)}% · ${b.description}`}</p>
+            </li>
+          ))}
+        </ul>
+      </Section>
+
       {canManage && (
         <Section>
           <ListGroup>
-            <ListItem icon={PenSquare} title="Quản lý nội dung học tập" description="Khóa học, bài kiểm tra, tài liệu · hàng chờ duyệt" href="/learn/manage" />
+            <ListItem icon={PenSquare} title="Đóng góp nội dung" description="Đăng khóa học, bài kiểm tra, tài liệu (PDF) · theo dõi duyệt" href="/learn/manage" />
           </ListGroup>
         </Section>
       )}

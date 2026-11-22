@@ -15,7 +15,7 @@ function sign(claims: Record<string, unknown>, secret = SECRET, alg = "HS256") {
 
 test("accepts a valid platform token and normalises email", () => {
   const c = verifyPlatformToken(sign({ sub: "m1", email: "Linh@PFC.vn", name: "Linh" }), SECRET, NOW);
-  assert.deepEqual(c, { sub: "m1", email: "linh@pfc.vn", name: "Linh" });
+  assert.deepEqual(c, { sub: "m1", email: "linh@pfc.vn", name: "Linh", pfcRole: null, pfcDepartment: null });
 });
 
 test("rejects wrong secret, wrong audience, wrong issuer, alg none, expiry and long-lived tokens", () => {

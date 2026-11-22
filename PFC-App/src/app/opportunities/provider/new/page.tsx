@@ -1,9 +1,10 @@
 "use client";
 
+import { BadgeCheck } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { hubFetch } from "@/platform/hub-proxy/client";
-import type { ApplyMode, OppType } from "@/modules/opportunity/types";
+import { hubFetch, useHub } from "@/platform/hub-proxy/client";
+import { TIER_LABEL, type ApplyMode, type OppType, type ProviderTier } from "@/modules/opportunity/types";
 import { OppGate } from "@/modules/opportunity/ui/OppGate";
 import { AppHeader, Button } from "@/ui";
 import { FormError, SelectInput, TextArea, TextInput } from "@/ui/Form";
@@ -20,6 +21,7 @@ export default function NewOpportunityPage() {
 
 function Form() {
   const router = useRouter();
+  const provider = useHub<{ provider?: { displayName: string; verificationTier: ProviderTier } }>("opp", "/provider/opportunities").data?.provider;
   const [f, setF] = useState({
     type: "INTERNSHIP" as OppType,
     title: "",
@@ -70,6 +72,17 @@ function Form() {
 
   return (
     <form onSubmit={submit} className="space-y-4 px-4 pt-2" noValidate>
+      {provider && (
+        <div className="flex items-center gap-2 rounded-xl bg-surface-2 px-4 py-3 text-[14px]">
+          <span className="text-muted">Đơn vị đăng:</span>
+          <b className="text-ink">{provider.displayName}</b>
+          {TIER_LABEL[provider.verificationTier] && (
+            <span className="inline-flex items-center gap-1 text-[12px] font-semibold text-primary">
+              <BadgeCheck size={14} /> {TIER_LABEL[provider.verificationTier]}
+            </span>
+          )}
+        </div>
+      )}
       <SelectInput label="Loại cơ hội" value={f.type} onChange={set("type")}>
         <option value="INTERNSHIP">Thực tập</option>
         <option value="JOB">Việc làm</option>
@@ -108,6 +121,11 @@ function Form() {
       <Button type="submit" block disabled={pending}>
         {pending ? "Đang lưu…" : "Lưu bản nháp"}
       </Button>
+      <p className="pb-6 text-[12px] text-muted">
+        {provider?.verificationTier === "TRUSTED_PARTNER"
+          ? "Đối tác tin cậy: bấm “Gửi xác minh” là tin hiện ngay, Ban điều hành hậu kiểm."
+          : "Sau khi lưu, bấm “Gửi xác minh”: tin hiện công khai khi người duyệt xác minh. Hết hạn nộp, tin tự chuyển sang Hết hạn."}
+      </p>
     </form>
   );
 }

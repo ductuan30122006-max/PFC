@@ -6,16 +6,19 @@ import { deleteContentAction, saveResourceAction, transitionAction } from "@/mod
 import type { ContentStatus } from "@/platform/workflow";
 import { Button, Section } from "@/ui";
 import { FormError, SelectInput, TextArea, TextInput } from "@/ui/Form";
+import { DocumentUploader } from "@/ui/DocumentUploader";
+import { SegmentedTabs } from "@/ui/SegmentedTabs";
 import { WorkflowBar } from "@/ui/WorkflowBar";
 import { useAction } from "@/ui/use-action";
 
 type R = { id?: string; title: string; kind: string; topic: string; url: string; description: string; status?: ContentStatus; rejectReason?: string | null; canEdit?: boolean; canApprove?: boolean; isAuthor?: boolean };
 
-/** EDU-A01 resource editor (eBook / template / checklist linked by https URL). */
+/** EDU-A01 resource editor: upload a PDF or link an https document (eBook / template / checklist / article). */
 export function ResourceForm({ initial }: { initial?: R }) {
   const router = useRouter();
   const [v, setV] = useState<R>(initial ?? { title: "", kind: "ebook", topic: "finance", url: "", description: "" });
   const { run, pending, error } = useAction();
+  const [source, setSource] = useState<"upload" | "link">(initial?.url && !initial.url.startsWith("/api/files/") && !initial.url.includes("/pfc/document/") ? "link" : "upload");
   const editable = !initial || initial.canEdit;
   const set = (k: keyof R) => (e: { target: { value: string } }) => setV((x) => ({ ...x, [k]: e.target.value }));
 
@@ -67,9 +70,29 @@ export function ResourceForm({ initial }: { initial?: R }) {
               <option value="development">Phát triển bản thân</option>
             </SelectInput>
           </div>
-          <TextInput label="Link tải / xem (https)" type="url" inputMode="url" placeholder="https://drive.google.com/…" value={v.url} onChange={set("url")} />
+          <SegmentedTabs
+            label="Nguồn tài liệu"
+            stretch
+            value={source}
+            onChange={(s) => {
+              setSource(s);
+              setV((x) => ({ ...x, url: "" }));
+            }}
+            options={[
+              { value: "upload", label: "Tải lên PDF" },
+              { value: "link", label: "Dán link" },
+            ]}
+          />
+          {source === "upload" ? (
+            <DocumentUploader value={v.url || null} onChange={(url) => setV((x) => ({ ...x, url: url ?? "" }))} />
+          ) : (
+            <>
+              <TextInput label="Link tải / xem (https)" type="url" inputMode="url" placeholder="https://drive.google.com/…" value={v.url} onChange={set("url")} />
+              <p className="-mt-2 text-[12px] text-muted">Tệp ở Google Drive, Notion…: bật quyền xem cho mọi người có link.</p>
+            </>
+          )}
           <TextArea label="Mô tả" value={v.description} onChange={set("description")} maxLength={1000} />
-          <p className="text-[12px] text-muted">Tệp được lưu ở dịch vụ bên ngoài (Google Drive, Notion…). Hãy bật quyền xem cho mọi người có link.</p>
+          <p className="text-[12px] text-muted">Chỉ đăng tài liệu bạn có quyền chia sẻ. Tài liệu được Ban Chuyên môn duyệt trước khi hiện công khai.</p>
           <FormError message={error} />
           <Button type="submit" block disabled={pending}>
             {pending ? "Đang lưu…" : initial?.id ? "Lưu thay đổi" : "Tạo tài liệu"}

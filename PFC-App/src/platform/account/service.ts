@@ -1,4 +1,5 @@
 import "server-only";
+import { rewardReferral } from "@/modules/rewards/server/service";
 import bcrypt from "bcryptjs";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -204,6 +205,7 @@ export async function confirmEmailChange(token: unknown): Promise<void> {
 export async function completeOnboarding(actor: Actor, interests: unknown): Promise<void> {
   const list = z.array(z.string()).max(10).parse(interests ?? []).filter((x): x is Interest => x in INTERESTS);
   await run("UPDATE members SET interests = ?, onboarded_at = COALESCE(onboarded_at, ?), updated_at = ? WHERE id = ?", [JSON.stringify([...new Set(list)]), now(), now(), actor.id]);
+  await rewardReferral(actor.id);
 }
 
 export async function setLocale(actor: Actor, locale: unknown): Promise<void> {

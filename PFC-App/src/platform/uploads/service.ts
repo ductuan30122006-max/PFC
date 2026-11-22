@@ -8,9 +8,52 @@ import type { Actor } from "@/platform/roles";
 import { ImageRejected, processImage } from "./image";
 import { putObject } from "./storage";
 
-export const UPLOAD_PURPOSES = ["listing", "avatar", "post", "project", "event"] as const;
+/** Image purposes. "document" is the one non-image purpose (PDF, see saveDocument). */
+export const UPLOAD_PURPOSES = ["listing", "avatar", "post", "project", "event", "place", "club", "document"] as const;
 export type UploadPurpose = (typeof UPLOAD_PURPOSES)[number];
 export type Upload = { id: string; url: string; width: number; height: number };
+
+/** Vercel functions accept ~4.5 MB request bodies, so documents stay under 4 MB (bigger files: share a link). */
+export const MAX_DOCUMENT_BYTES = 4 * 1024 * 1024;
+
+/**
+ * Pure check for an uploaded PDF: real PDF header, size, and no active content (JavaScript, launch actions,
+ * embedded files). Returns an error message or null.
+ */
+export function checkPdf(buf: Buffer): string | null {
+  if (buf.length === 0) return "Tệp rỗng.";
+  if (buf.length > MAX_DOCUMENT_BYTES) return "Tệp PDF tối đa 4 MB. Tệp lớn hơn: chia sẻ bằng link.";
+  if (buf.subarray(0, 5).toString("latin1") !== "%PDF-") return "Chỉ nhận tệp PDF.";
+  const text = buf.toString("latin1");
+  if (/\/(JavaScript|JS|Launch|EmbeddedFile|RichMedia|XFA)\b/.test(text)) return "PDF chứa mã chạy tự động hoặc tệp đính kèm, không được phép tải lên.";
+  if (!/%%EOF\s*$/.test(text.slice(-1024))) return "Tệp PDF bị hỏng hoặc không đầy đủ.";
+  return null;
+}
+
+/** Stores one PDF for the signed-in member (Học tập documents). 20 / hour / member. */
+export async function saveDocument(actor: Actor, input: Buffer): Promise<Upload> {
+  if (!(await allowAttempt(`upload-doc:${actor.id}`, 20, 60 * 60_000))) throw new ActionError("Bạn tải tài liệu quá nhiều. Vui lòng thử lại sau.", "rate_limited");
+  const err = checkPdf(input);
+  if (err) throw new ActionError(err, "invalid_document");
+  const id = randomUUID();
+  const key = `document/${id}.pdf`;
+  const url = await putObject(key, input, "application/pdf");
+  await run("INSERT INTO uploads (id, owner_id, purpose, mime, bytes, width, height, storage_key, url, created_at) VALUES (?, ?, 'document', 'application/pdf', ?, NULL, NULL, ?, ?, ?)", [
+    id,
+    actor.id,
+    input.length,
+    key,
+    url,
+    new Date().toISOString(),
+  ]);
+  await audit(actor.id, "upload.document", `upload:${id}`, "success");
+  return { id, url, width: 0, height: 0 };
+}
+
+/** Is this URL one of the actor's own uploaded documents? */
+export async function isOwnDocument(actor: Actor, url: string): Promise<boolean> {
+  return (await all("SELECT 1 AS x FROM uploads WHERE owner_id = ? AND purpose = 'document' AND url = ?", [actor.id, url])).length > 0;
+}
 
 /** Validates, cleans and stores one image for the signed-in member. 60 uploads / hour / member. */
 export async function saveImage(actor: Actor, purpose: UploadPurpose, input: Buffer): Promise<Upload> {

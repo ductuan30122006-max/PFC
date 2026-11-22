@@ -1,11 +1,13 @@
 import Link from "next/link";
-import { Clock, Plus, ReceiptText, Store } from "lucide-react";
+import { BadgeCheck, Clock, Plus, ReceiptText, Store } from "lucide-react";
 import { requireMember, toActor } from "@/platform/auth/session";
 import { formatVnd } from "@/lib/money";
 import { STATUS_LABEL, STATUS_TONE } from "@/platform/workflow";
 import { getSeller, myListings, sellerStats } from "@/modules/market/server/service";
 import { AppHeader, Badge, ButtonLink, Card, EmptyState, ListGroup, ListItem, Section } from "@/ui";
+import { getSettings } from "@/platform/settings/service";
 import { SellerRegistration } from "./SellerRegistration";
+import { VerificationRequest } from "./VerificationRequest";
 
 export const metadata = { title: "Bán hàng" };
 export const dynamic = "force-dynamic";
@@ -46,13 +48,13 @@ export default async function SellPage() {
     );
   }
 
-  const [stats, listings] = await Promise.all([sellerStats(actor), myListings(actor)]);
+  const [stats, listings, { market }] = await Promise.all([sellerStats(actor), myListings(actor), getSettings()]);
   return (
     <>
       <AppHeader
         title={seller.shopName}
         backHref="/market"
-        subtitle="Kênh người bán"
+        subtitle={seller.level === "verified" ? "Kênh người bán · đã xác minh" : "Kênh người bán · cơ bản"}
       />
       <Section>
         <div className="grid grid-cols-2 gap-3">
@@ -112,6 +114,26 @@ export default async function SellPage() {
             ))}
           </ul>
         )}
+      </Section>
+      <Section title="Xác minh cửa hàng">
+        <div id="verify" className="scroll-mt-20">
+          {seller.level === "verified" ? (
+            <p className="flex items-center gap-2 rounded-xl bg-income-soft px-4 py-3 text-[14px] font-semibold text-income">
+              <BadgeCheck size={18} /> Cửa hàng đã xác minh: bán mọi loại tin, không giới hạn giá.
+            </p>
+          ) : seller.verifyStatus === "pending" ? (
+            <p className="rounded-xl bg-warning-soft px-4 py-3 text-[14px] text-warning">Yêu cầu xác minh đang chờ Ban điều hành duyệt.</p>
+          ) : (
+            <>
+              <p className="mb-3 text-[13px] text-ink-2">
+                Cửa hàng cơ bản bán sản phẩm vật lý và sản phẩm số tới {market.basicMaxPrice.toLocaleString("vi-VN")}₫/món, tối đa {market.basicMaxListings} tin. Xác minh để bán dịch vụ, khóa học, vé sự kiện và món giá trị cao.
+              </p>
+              {seller.verifyStatus === "rejected" && seller.rejectReason && <p className="mb-3 rounded-xl bg-expense-soft px-3 py-2 text-[13px] text-expense">Lần trước bị từ chối: {seller.rejectReason}</p>}
+              <VerificationRequest />
+            </>
+          )}
+        </div>
+        <div className="h-6" />
       </Section>
     </>
   );

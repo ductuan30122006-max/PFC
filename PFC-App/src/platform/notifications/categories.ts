@@ -11,6 +11,9 @@ export const CATEGORIES = {
   messages: { label: "Tin nhắn", description: "Tin nhắn mới", locked: false },
   events: { label: "Sự kiện & vé", description: "Đăng ký, vé, nhắc lịch, thay đổi sự kiện", locked: false },
   payments: { label: "Thanh toán & hoàn tiền", description: "Thanh toán thành công / thất bại, hoàn tiền", locked: false },
+  rewards: { label: "Điểm thưởng", description: "Cộng điểm, lên hạng, đổi quà", locked: false },
+  announcements: { label: "Thông báo từ PFC", description: "Tin chung do Ban điều hành gửi", locked: false },
+  support: { label: "Hỗ trợ", description: "Trả lời yêu cầu hỗ trợ của bạn", locked: false },
 } as const;
 export type Category = keyof typeof CATEGORIES;
 export const CHANNELS = ["inapp", "email", "push"] as const;
@@ -27,6 +30,9 @@ export const DEFAULT_PREFS: Record<Category, Record<Channel, boolean>> = {
   messages: { inapp: true, email: false, push: true },
   events: { inapp: true, email: true, push: true },
   payments: { inapp: true, email: true, push: true },
+  rewards: { inapp: true, email: false, push: false },
+  announcements: { inapp: true, email: false, push: true },
+  support: { inapp: true, email: true, push: true },
 };
 
 export function isCategory(v: unknown): v is Category {

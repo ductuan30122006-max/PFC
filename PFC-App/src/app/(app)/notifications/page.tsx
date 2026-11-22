@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BellOff, BookOpen, Briefcase, CalendarDays, CreditCard, MessageCircle, Rocket, Settings, ShieldCheck, ShoppingBag, Users } from "lucide-react";
+import { BellOff, BookOpen, Briefcase, CalendarDays, CreditCard, Gift, LifeBuoy, Megaphone, MessageCircle, Rocket, Settings, ShieldCheck, ShoppingBag, Users } from "lucide-react";
 import { requireMember } from "@/platform/auth/session";
 import { CATEGORIES, type Category } from "@/platform/notifications/categories";
 import { listNotifications, pruneOld, unreadCount } from "@/platform/notifications/service";
@@ -20,6 +20,9 @@ const ICON: Record<Category, { icon: typeof ShieldCheck; tone: string }> = {
   messages: { icon: MessageCircle, tone: "bg-primary-soft text-primary" },
   events: { icon: CalendarDays, tone: "bg-warning-soft text-warning" },
   payments: { icon: CreditCard, tone: "bg-income-soft text-income" },
+  rewards: { icon: Gift, tone: "bg-warning-soft text-warning" },
+  announcements: { icon: Megaphone, tone: "bg-primary-soft text-primary" },
+  support: { icon: LifeBuoy, tone: "bg-income-soft text-income" },
 };
 
 function ago(iso: string): string {

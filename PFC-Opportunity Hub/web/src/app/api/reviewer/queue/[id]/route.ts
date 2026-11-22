@@ -20,6 +20,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     return NextResponse.json({ error: body.error.flatten() }, { status: 400 });
   }
 
+  if (body.data.decision === "REJECTED" && !body.data.reason?.trim()) {
+    return NextResponse.json({ error: "Cần ghi lý do từ chối / gỡ tin." }, { status: 400 });
+  }
+
   const opp = await prisma.oppOpportunity.findUnique({ where: { id } });
   if (!opp) return NextResponse.json({ error: "Not found" }, { status: 404 });
 

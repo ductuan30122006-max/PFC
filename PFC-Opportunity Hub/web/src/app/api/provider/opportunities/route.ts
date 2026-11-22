@@ -23,11 +23,11 @@ export async function GET() {
   if (!providerId) {
     return NextResponse.json({ error: "Not a provider" }, { status: 403 });
   }
-  const items = await prisma.oppOpportunity.findMany({
-    where: { providerId },
-    orderBy: { updatedAt: "desc" },
-  });
-  return NextResponse.json({ items });
+  const [items, provider] = await Promise.all([
+    prisma.oppOpportunity.findMany({ where: { providerId }, orderBy: { updatedAt: "desc" } }),
+    prisma.providerProfile.findUnique({ where: { id: providerId }, select: { displayName: true, verificationTier: true } }),
+  ]);
+  return NextResponse.json({ items, provider });
 }
 
 /** Create Draft — inspired by jobhive POST /api/jobs */

@@ -3,9 +3,10 @@ import { ShieldAlert } from "lucide-react";
 import { requireMember, toActor } from "@/platform/auth/session";
 import { formatVnd } from "@/lib/money";
 import { can } from "@/platform/roles";
-import { listSellersByStatus, listingQueue } from "@/modules/market/server/service";
+import { listSellersByStatus, listingQueue, verificationQueue } from "@/modules/market/server/service";
 import { AppHeader, Badge, EmptyState, Section } from "@/ui";
 import { SellerDecision } from "./SellerDecision";
+import { VerifyDecision } from "./VerifyDecision";
 
 export const metadata = { title: "Kiểm duyệt Marketplace" };
 export const dynamic = "force-dynamic";
@@ -24,10 +25,11 @@ export default async function MarketManagePage() {
       </>
     );
   }
-  const [pendingSellers, activeSellers, queue] = await Promise.all([
+  const [pendingSellers, activeSellers, queue, verify] = await Promise.all([
     canSellers ? listSellersByStatus(actor, "pending") : Promise.resolve([]),
     canSellers ? listSellersByStatus(actor, "approved") : Promise.resolve([]),
     canListings ? listingQueue(actor) : Promise.resolve([]),
+    canSellers ? verificationQueue(actor) : Promise.resolve([]),
   ]);
   return (
     <>
@@ -45,6 +47,17 @@ export default async function MarketManagePage() {
               ))}
             </ul>
           )}
+        </Section>
+      )}
+      {canSellers && verify.length > 0 && (
+        <Section title={`Yêu cầu xác minh cửa hàng (${verify.length})`}>
+          <ul className="space-y-3">
+            {verify.map((s) => (
+              <li key={s.memberId}>
+                <VerifyDecision s={{ memberId: s.memberId, shopName: s.shopName, memberName: s.memberName, legalName: s.legalName, phone: s.phone, note: s.verifyNote }} />
+              </li>
+            ))}
+          </ul>
         </Section>
       )}
       {canListings && (

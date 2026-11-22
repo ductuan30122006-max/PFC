@@ -12,6 +12,8 @@ import {
   monthOverview,
   seriesEnding,
 } from "@/modules/finance/server/queries";
+import { insightsFor } from "@/modules/finance/server/insights";
+import { InsightList } from "@/modules/finance/ui/InsightList";
 import { MonthSwitcher } from "@/modules/finance/ui/MonthSwitcher";
 import { TxRow } from "@/modules/finance/ui/TxList";
 import { monthParam } from "@/modules/finance/ui/page-params";
@@ -37,12 +39,13 @@ function Delta({ pct, goodWhenUp }: { pct: number | null; goodWhenUp: boolean })
 export default async function FinanceDashboard({ searchParams }: { searchParams: Promise<Record<string, string>> }) {
   const me = await requireMember("/finance");
   const month = monthParam((await searchParams).month);
-  const [overview, categories, budgets, goals, series] = await Promise.all([
+  const [overview, categories, budgets, goals, series, insightItems] = await Promise.all([
     monthOverview(me.id, month),
     listCategories(me.id, { includeArchived: true }),
     budgetsForMonth(me.id, month),
     listGoals(me.id),
     seriesEnding(me.id, month, 6),
+    insightsFor(me.id, month),
   ]);
   const { totals, previous, transactions } = overview;
   const slices = categorySlices(transactions, "expense", categories);
@@ -113,6 +116,12 @@ export default async function FinanceDashboard({ searchParams }: { searchParams:
           ))}
         </ul>
       </Section>
+
+      {insightItems.length > 0 && insightItems[0].id !== "empty" && (
+        <Section title="Gợi ý cho bạn" action={<Link href={`/finance/insights?month=${month}`} className="text-[13px] font-semibold text-primary">Xem thêm</Link>}>
+          <InsightList items={insightItems.slice(0, 2)} />
+        </Section>
+      )}
 
       {transactions.length === 0 ? (
         <EmptyState

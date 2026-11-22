@@ -12,7 +12,7 @@ const TABS: readonly HubTab[] = [
     href: "/finance/more",
     label: "Tiện ích",
     icon: LayoutGrid,
-    match: ["/finance/goals", "/finance/challenges", "/finance/reports", "/finance/tools", "/finance/categories", "/finance/data", "/finance/overview"],
+    match: ["/finance/goals", "/finance/challenges", "/finance/reports", "/finance/tools", "/finance/categories", "/finance/data", "/finance/overview", "/finance/invest", "/finance/insights", "/finance/places"],
   },
 ];
 

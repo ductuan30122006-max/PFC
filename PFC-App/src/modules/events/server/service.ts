@@ -1,4 +1,7 @@
 import "server-only";
+import { awardPoints } from "@/modules/rewards/server/service";
+import { assertAllowed } from "@/platform/admin/restrictions";
+import { isEnabled } from "@/platform/settings/service";
 import { randomBytes, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { all, one, run, withTransaction } from "@/platform/db/client";
@@ -112,6 +115,7 @@ async function validated(actor: Actor, input: unknown) {
 
 /** EVT-05 Create Event (draft). Any member may organize; publishing needs approval (event.approve). */
 export async function createEvent(actor: Actor, input: unknown): Promise<string> {
+  await assertAllowed(actor.id, "events_host", "events");
   const d = await validated(actor, input);
   const id = randomUUID();
   const t = now();
@@ -337,6 +341,7 @@ const regSchema = z.object({
  * 15 minutes while the member pays through VNPAY. Capacity is checked inside one write transaction.
  */
 export async function register(actor: Actor, eventId: string, input: unknown, ipAddr: string): Promise<{ registrationId: string; payUrl: string | null }> {
+  if (!(await isEnabled("events"))) throw new ActionError("Sự kiện đang tạm tắt.");
   const d = regSchema.parse(input);
   const e = await eventRow(eventId);
   if (!e) throw new ActionError("Không tìm thấy sự kiện.");
@@ -502,8 +507,8 @@ export async function checkIn(actor: Actor, eventId: string, rawCode: string, co
   await requireManage(actor, eventId);
   const code = parseTicket(rawCode);
   if (!code) return { ok: false, error: "Mã vé không hợp lệ." };
-  const r = await one<{ id: string; event_id: string; status: string; attendee_name: string; checked_in_at: string | null; price: number; paid: number; name: string }>(
-    "SELECT r.id, r.event_id, r.status, r.attendee_name, r.checked_in_at, r.price, r.paid, t.name FROM evt_registrations r JOIN evt_ticket_types t ON t.id = r.ticket_type_id WHERE r.ticket_code = ?",
+  const r = await one<{ id: string; member_id: string; event_id: string; status: string; attendee_name: string; checked_in_at: string | null; price: number; paid: number; name: string }>(
+    "SELECT r.id, r.member_id, r.event_id, r.status, r.attendee_name, r.checked_in_at, r.price, r.paid, t.name FROM evt_registrations r JOIN evt_ticket_types t ON t.id = r.ticket_type_id WHERE r.ticket_code = ?",
     [code],
   );
   if (!r || r.event_id !== eventId) return { ok: false, error: "Vé không thuộc sự kiện này." };
@@ -512,6 +517,7 @@ export async function checkIn(actor: Actor, eventId: string, rawCode: string, co
   if (Number(r.price) > 0 && !Number(r.paid) && !collected) return { ok: true, attendee: r.attendee_name, ticketName: r.name, collect: Number(r.price) };
   const n = await run("UPDATE evt_registrations SET checked_in_at = ?, checked_in_by = ?, paid = 1, updated_at = ? WHERE id = ? AND checked_in_at IS NULL AND status = 'confirmed'", [now(), actor.id, now(), r.id]);
   if (n !== 1) return { ok: false, error: "Vé vừa được check-in ở máy khác.", attendee: r.attendee_name };
+  await awardPoints(r.member_id, "event_checkin", eventId);
   return { ok: true, attendee: r.attendee_name, ticketName: r.name, collect: 0 };
 }
 

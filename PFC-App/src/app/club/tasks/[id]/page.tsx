@@ -8,7 +8,8 @@ import { HubErrorState, ListSkeleton } from "@/platform/hub-proxy/HubStates";
 import { CLUB_RUN_HINT, clubPost, useClub } from "@/modules/club/session";
 import { PRIORITY, TASK_NEXT, TASK_STATUS_LABEL, fmtDate, fmtDateTime, type TaskDetail, type TaskStatus } from "@/modules/club/types";
 import { AppHeader, Badge, Button, Card, Section } from "@/ui";
-import { FormError, TextArea } from "@/ui/Form";
+import { FormError, SelectInput, TextArea, TextInput } from "@/ui/Form";
+import { AttachButton, AttachmentList } from "@/modules/club/ui/FileAttach";
 import { ProgressBar } from "@/ui/ProgressBar";
 import { cx } from "@/ui/cx";
 
@@ -22,7 +23,9 @@ const MOVE_LABEL: Partial<Record<TaskStatus, string>> = {
 /** Task detail (Club 13-task-modal → full screen on mobile): status FSM, review, checklist, comments. */
 export default function ClubTaskDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { can, reload: reloadClub } = useClub();
+  const { can, home, reload: reloadClub } = useClub();
+  const [progressDraft, setProgressDraft] = useState<number | null>(null);
+  const [deadlineDraft, setDeadlineDraft] = useState<string | null>(null);
   const { data, error, loading, reload } = useHub<TaskDetail>("club", `?action=task_detail&taskId=${encodeURIComponent(id)}`);
   const [comment, setComment] = useState("");
   const [newItem, setNewItem] = useState("");
@@ -40,6 +43,11 @@ export default function ClubTaskDetailPage() {
     );
   }
   const t = data.task;
+  const meId = home.user?.id ?? null;
+  const canManageTask = can("manage_tasks");
+  const canWork = canManageTask || (!!meId && t.assigneeId === meId);
+  const progress = Math.round(t.progress ?? t.progressPct ?? 0);
+  const attachments = data.attachments ?? [];
   const done = data.checklist.filter((c) => c.done).length;
   const canReview = t.status === "review" && can("review_tasks");
   const moves = TASK_NEXT[t.status].filter((s) => {
@@ -88,6 +96,93 @@ export default function ClubTaskDetailPage() {
         <div className="px-4 pt-3">
           <FormError message={err} />
         </div>
+      )}
+
+      <Section title={`Tiến độ: ${progress}%`}>
+        <ProgressBar value={progress} label={`Tiến độ ${progress}%`} />
+        {canWork && t.status !== "done" && t.status !== "cancelled" && (
+          <div className="mt-3 space-y-2">
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={5}
+              value={progressDraft ?? progress}
+              onChange={(e) => setProgressDraft(Number(e.target.value))}
+              aria-label="Cập nhật tiến độ"
+              className="w-full accent-[var(--pfc-primary)]"
+            />
+            {progressDraft !== null && progressDraft !== progress && (
+              <Button
+                className="min-h-10 text-[14px]"
+                disabled={busy !== null}
+                onClick={async () => {
+                  if (await run("progress", "set_task_progress", { taskId: t.id, progress: progressDraft })) setProgressDraft(null);
+                }}
+              >
+                Lưu tiến độ {progressDraft}%
+              </Button>
+            )}
+          </div>
+        )}
+      </Section>
+
+      <Section title={`Tài liệu đính kèm (${attachments.length})`}>
+        <div className="space-y-3">
+          <AttachmentList
+            items={attachments}
+            busy={busy !== null}
+            canRemove={(a) => canManageTask || ("uploaderId" in a && a.uploaderId === meId)}
+            onRemove={(i) => run(`rm-${attachments[i].id}`, "remove_task_attachment", { attachmentId: attachments[i].id })}
+          />
+          {canWork && (
+            <AttachButton
+              disabled={busy !== null || attachments.length >= 10}
+              onUploaded={async (f) => {
+                await run("attach", "add_task_attachment", { taskId: t.id, ...f });
+              }}
+            />
+          )}
+          {t.status === "in_progress" && attachments.length === 0 && canWork && (
+            <p className="text-[12px] text-muted">Cần ít nhất một tệp kết quả trước khi “Gửi duyệt”.</p>
+          )}
+        </div>
+      </Section>
+
+      {canManageTask && t.status !== "done" && t.status !== "cancelled" && (
+        <Section title="Giao việc & hạn chót">
+          <div className="space-y-3">
+            <SelectInput label="Người thực hiện" value={t.assigneeId ?? ""} disabled={busy !== null} onChange={(e) => run("assign", "assign_task", { taskId: t.id, assigneeId: e.target.value || null })}>
+              <option value="">Chưa giao</option>
+              {home.members
+                .filter((m) => m.status === "active")
+                .map((m) => (
+                  <option key={m.memberId} value={m.memberId}>
+                    {m.fullName}
+                    {m.teamName ? ` · ${m.teamName}` : ""}
+                  </option>
+                ))}
+            </SelectInput>
+            <TextInput
+              label="Hạn chót"
+              type="date"
+              value={deadlineDraft ?? (t.deadline ? new Date(t.deadline).toLocaleDateString("sv-SE", { timeZone: "Asia/Ho_Chi_Minh" }) : "")}
+              onChange={(e) => setDeadlineDraft(e.target.value)}
+            />
+            {deadlineDraft !== null && (
+              <Button
+                variant="secondary"
+                className="min-h-10 text-[14px]"
+                disabled={busy !== null}
+                onClick={async () => {
+                  if (await run("deadline", "update_task", { taskId: t.id, deadline: deadlineDraft ? new Date(`${deadlineDraft}T17:00:00+07:00`).toISOString() : null })) setDeadlineDraft(null);
+                }}
+              >
+                Lưu hạn chót
+              </Button>
+            )}
+          </div>
+        </Section>
       )}
 
       {moves.length > 0 && (

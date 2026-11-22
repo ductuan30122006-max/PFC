@@ -26,7 +26,13 @@ const offline = (cfg: HubConfig) =>
 async function exchange(cfg: HubConfig, member: Member): Promise<{ cookie: string; setCookie: string } | null> {
   const secret = cfg.sso.secret();
   if (!secret) return null;
-  const token = mintPlatformToken({ sub: member.id, email: member.email, name: member.fullName }, cfg.sso.audience, secret, Math.floor(Date.now() / 1000));
+  // Role + department let hubs grant posting / review rights to PFC leaders (ADR-011 addendum).
+  const token = mintPlatformToken(
+    { sub: member.id, email: member.email, name: member.fullName, pfc_role: member.role, pfc_department: member.department ?? null },
+    cfg.sso.audience,
+    secret,
+    Math.floor(Date.now() / 1000),
+  );
   const res = await fetch(`${cfg.origin().replace(/\/$/, "")}${cfg.sso.path}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -73,7 +79,8 @@ async function proxy(req: Request, ctx: Ctx): Promise<Response> {
   const member = await currentMember();
   const secret = cfg.sso.secret();
   const ownerName = ownerCookieName(cfg.cookie);
-  const expectedOwner = member && secret ? ownerTag(hub, member.id, secret) : null;
+  // The tag covers role + department, so a role change re-runs the SSO exchange (hub rights follow PFC roles).
+  const expectedOwner = member && secret ? ownerTag(hub, `${member.id}:${member.role}:${member.department ?? ""}`, secret) : null;
   const presentedOwner = pickCookie(req.headers.get("cookie"), ownerName)?.split("=")[1] ?? null;
   // Use an existing hub session only if it was minted for this exact PFC member.
   let cookie = member && expectedOwner && presentedOwner === expectedOwner ? pickCookie(req.headers.get("cookie"), cfg.cookie) : null;

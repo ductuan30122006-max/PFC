@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
-import { requireMember } from "@/platform/auth/session";
-import { getSeller } from "@/modules/market/server/service";
+import { requireMember, toActor } from "@/platform/auth/session";
+import { getSettings } from "@/platform/settings/service";
+import { getSeller, linkableItems } from "@/modules/market/server/service";
 import { AppHeader } from "@/ui";
 import { ListingEditor } from "../ListingEditor";
 
@@ -11,10 +12,11 @@ export default async function NewListingPage() {
   const me = await requireMember("/market/sell/listings/new");
   const s = await getSeller(me.id);
   if (!s || s.status !== "approved") redirect("/market/sell");
+  const [links, settings] = await Promise.all([linkableItems(toActor(me)), getSettings()]);
   return (
     <>
       <AppHeader back backFallback="/market/sell" title="Đăng tin mới" />
-      <ListingEditor />
+      <ListingEditor links={links} level={s.level} limits={settings.market} />
     </>
   );
 }

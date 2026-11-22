@@ -6,14 +6,14 @@ import { Button, Section } from "@/ui";
 import { FormError, TextArea, TextInput } from "@/ui/Form";
 import { useAction } from "@/ui/use-action";
 
-/** SELL-02 Seller Registration (Q04: risk-based verification — reviewed by Chủ nhiệm / Ban điều hành). */
-export function SellerRegistration({ initial, submitLabel = "Gửi đăng ký người bán" }: { initial?: { shopName: string; bio: string; contact: string }; submitLabel?: string }) {
+/** SELL-02 Seller Registration (Q04 risk-based verification: basic shop at once, "verified" level reviewed by staff). */
+export function SellerRegistration({ initial, submitLabel = "Mở cửa hàng" }: { initial?: { shopName: string; bio: string; contact: string }; submitLabel?: string }) {
   const [v, setV] = useState(initial ?? { shopName: "", bio: "", contact: "" });
   const { run, pending, error } = useAction();
   const [saved, setSaved] = useState(false);
   return (
     <Section title={initial ? "Hồ sơ cửa hàng" : "Mở cửa hàng trên PFC"}>
-      {!initial && <p className="mb-3 text-[14px] text-ink-2">Bán sách cũ, tài liệu, dịch vụ hay khóa học của bạn cho cộng đồng PFC. Hồ sơ cần được duyệt trước khi đăng tin.</p>}
+      {!initial && <p className="mb-3 text-[14px] text-ink-2">Bán sách cũ, tài liệu, dịch vụ hay khóa học của bạn cho cộng đồng PFC. Tài khoản đã xác thực email mở cửa hàng ngay để bán sản phẩm vật lý và sản phẩm số; dịch vụ, khóa học, vé sự kiện cần xác minh thêm. Mỗi tin đăng được duyệt trước khi hiện công khai.</p>}
       <form
         className="space-y-4"
         noValidate

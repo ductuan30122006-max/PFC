@@ -31,10 +31,11 @@ export const createQuizAction = async (input: unknown) => act((a) => edu.createQ
 export const updateQuizAction = async (id: string, input: unknown) => act((a) => edu.updateQuiz(a, id, input));
 export const saveQuestionAction = async (quizId: string, questionId: string | null, input: unknown) => act((a) => edu.saveQuestion(a, quizId, questionId, input));
 export const deleteQuestionAction = async (quizId: string, questionId: string) => act((a) => edu.deleteQuestion(a, quizId, questionId));
+export const startAttemptAction = async (quizId: string) => act((a) => edu.startAttempt(a, quizId));
 export const submitAttemptAction = async (quizId: string, answers: unknown) => act((a) => edu.submitAttempt(a, quizId, answers));
 export const saveResourceAction = async (id: string | null, input: unknown) => act((a) => edu.saveResource(a, id, input));
 export const createThreadAction = async (input: unknown) => act((a) => edu.createThread(a, input));
-export const replyAction = async (threadId: string, body: string) => act((a) => edu.reply(a, threadId, body));
+export const replyAction = async (threadId: string, body: string, parentId?: string | null) => act((a) => edu.reply(a, threadId, body, parentId));
 export const toggleLikeAction = async (threadId: string) => act((a) => edu.toggleLike(a, threadId));
 export const moderateThreadAction = async (threadId: string, change: { hidden?: boolean; locked?: boolean }) => act((a) => edu.moderateThread(a, threadId, change));
 export const moderateReplyAction = async (replyId: string, hidden: boolean) => act((a) => edu.moderateReply(a, replyId, hidden));

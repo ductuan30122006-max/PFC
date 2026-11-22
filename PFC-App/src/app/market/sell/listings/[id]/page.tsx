@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { requireMember, toActor } from "@/platform/auth/session";
-import { getListing } from "@/modules/market/server/service";
+import { getSettings } from "@/platform/settings/service";
+import { getListing, getSeller, linkableItems } from "@/modules/market/server/service";
 import { AppHeader } from "@/ui";
 import { ListingEditor } from "../ListingEditor";
 
@@ -9,12 +10,17 @@ export const dynamic = "force-dynamic";
 export default async function EditListingPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const me = await requireMember(`/market/sell/listings/${id}`);
-  const l = await getListing(toActor(me), id);
+  const actor = toActor(me);
+  const l = await getListing(actor, id);
   if (!l || !l.isOwner) notFound();
+  const [links, seller, s] = await Promise.all([linkableItems(actor), getSeller(me.id), getSettings()]);
   return (
     <>
       <AppHeader back backFallback="/market/sell" title="Quản lý tin đăng" />
       <ListingEditor
+        links={links}
+        level={seller?.level ?? "basic"}
+        limits={s.market}
         existing={{
           id: l.id,
           status: l.status,
@@ -29,6 +35,9 @@ export default async function EditListingPage({ params }: { params: Promise<{ id
           unlimited: l.stock === null,
           delivery: l.delivery,
           images: l.images,
+          tags: l.tags,
+          courseId: l.courseId ?? "",
+          eventId: l.eventId ?? "",
         }}
       />
     </>

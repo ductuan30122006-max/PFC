@@ -9,7 +9,7 @@ export const PLATFORM_ISSUER = "pfc-platform";
 export const TOKEN_TTL_SECONDS = 60;
 
 export function mintPlatformToken(
-  claims: { sub: string; email: string; name: string },
+  claims: { sub: string; email: string; name: string; pfc_role?: string; pfc_department?: string | null },
   audience: string,
   secret: string,
   nowSec: number,

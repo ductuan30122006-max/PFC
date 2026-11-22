@@ -90,11 +90,14 @@ function parseStringArray(raw: string | null | undefined): string[] {
   }
 }
 
+/** Media links: PFC App uploads (`/api/files/…`) or https URLs only — never javascript:/data: etc. */
+const SAFE_MEDIA_URL = /^(\/api\/files\/[a-z]+\/[0-9a-f-]{36}\.webp|https:\/\/[^\s"'<>]{8,500})$/;
+
 function normalizeUrlList(list: string[] | undefined | null): string[] {
   if (!list?.length) return [];
   return [
     ...new Set(
-      list.map((u) => u.trim()).filter((u) => u.length > 0),
+      list.map((u) => u.trim()).filter((u) => u.length > 0 && SAFE_MEDIA_URL.test(u)),
     ),
   ].slice(0, 24);
 }
@@ -187,10 +190,8 @@ function mediaFieldsFromInput(input: ActivityInput) {
     input.videoEmbeds ??
       (input.videoUrl ? [input.videoUrl] : undefined),
   );
-  const coverUrl =
-    input.coverUrl?.trim() ||
-    mediaUrls[0] ||
-    null;
+  const cover = input.coverUrl?.trim();
+  const coverUrl = (cover && SAFE_MEDIA_URL.test(cover) ? cover : null) || mediaUrls[0] || null;
   const withCover =
     coverUrl && !mediaUrls.includes(coverUrl)
       ? [coverUrl, ...mediaUrls]

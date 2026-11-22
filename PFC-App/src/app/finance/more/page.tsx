@@ -3,13 +3,15 @@ import {
   ArrowUpRight,
   ChartColumn,
   Database,
+  Lightbulb,
   MapPin,
   PiggyBank,
   Shapes,
   Target,
+  TrendingUp,
   Wrench,
 } from "lucide-react";
-import { AppHeader, Badge, ListGroup, ListItem, Section } from "@/ui";
+import { AppHeader, ListGroup, ListItem, Section } from "@/ui";
 
 export const metadata = { title: "Tiện ích" };
 
@@ -26,6 +28,8 @@ export default function FinanceMorePage() {
       </Section>
       <Section>
         <ListGroup label="Phân tích">
+          <ListItem icon={Lightbulb} title="Gợi ý tài chính" description="Nhận xét tự động từ thu chi của bạn" href="/finance/insights" />
+          <ListItem icon={TrendingUp} title="Danh mục đầu tư" description="Cổ phiếu, quỹ, vàng, tiền gửi · lãi/lỗ" href="/finance/invest" />
           <ListItem icon={ChartColumn} title="Báo cáo" description="Tháng, quý, năm · xuất CSV" href="/finance/reports" />
           <ListItem icon={ArrowDownLeft} title="Tổng quan thu nhập" href="/finance/overview/income" />
           <ListItem icon={ArrowUpRight} title="Tổng quan chi tiêu" href="/finance/overview/expense" />
@@ -40,13 +44,7 @@ export default function FinanceMorePage() {
       </Section>
       <Section>
         <ListGroup label="Cộng đồng">
-          <ListItem
-            icon={MapPin}
-            title="Ngon – Bổ – Rẻ"
-            description="Chia sẻ địa điểm tiết kiệm (FIN-26…34)"
-            trailing={<Badge tone="muted">Sắp có</Badge>}
-            disabled
-          />
+          <ListItem icon={MapPin} title="Ngon – Bổ – Rẻ" description="Địa điểm ăn uống, học tập tiết kiệm do thành viên chia sẻ" href="/finance/places" />
         </ListGroup>
       </Section>
     </>

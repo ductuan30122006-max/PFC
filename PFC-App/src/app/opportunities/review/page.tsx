@@ -21,14 +21,16 @@ export default function ReviewPage() {
 }
 
 function Queue() {
-  const { data, error, loading, reload } = useHub<{ items: Opportunity[] }>("opp", "/reviewer/queue");
+  const { data, error, loading, reload } = useHub<{ items: Opportunity[]; postReview?: Opportunity[] }>("opp", "/reviewer/queue");
   const [open, setOpen] = useState<Opportunity | null>(null);
   const [reason, setReason] = useState("");
   const [state, setState] = useState<{ pending?: boolean; error?: string }>({});
   if (loading && !data) return <ListSkeleton />;
   if (error) return <HubErrorState error={error} onRetry={reload} hubName="Cơ hội" runHint={OPP_RUN_HINT} />;
   const items = data?.items ?? [];
-  if (items.length === 0) return <EmptyState icon={ClipboardCheck} title="Không có tin chờ duyệt" description="Tin mới gửi xác minh sẽ xuất hiện ở đây." />;
+  const post = data?.postReview ?? [];
+  if (items.length === 0 && post.length === 0) return <EmptyState icon={ClipboardCheck} title="Không có tin chờ duyệt" description="Tin mới gửi xác minh sẽ xuất hiện ở đây." />;
+  const live = open?.status === "VERIFIED";
 
   async function decide(decision: "VERIFIED" | "REJECTED") {
     if (!open) return;
@@ -47,6 +49,7 @@ function Queue() {
 
   return (
     <div className="space-y-3 px-4 pt-2">
+      {items.length > 0 && <p className="text-[13px] font-semibold text-muted uppercase">Chờ duyệt ({items.length})</p>}
       {items.map((o) => (
         <button key={o.id} type="button" className="pressable block w-full text-left" onClick={() => setOpen(o)}>
           <Card>
@@ -60,19 +63,43 @@ function Queue() {
           </Card>
         </button>
       ))}
+      {post.length > 0 && (
+        <>
+          <p className="pt-2 text-[13px] font-semibold text-muted uppercase">Hậu kiểm: Trusted Partner đã đăng ({post.length})</p>
+          {post.map((o) => (
+            <button key={o.id} type="button" className="pressable block w-full text-left" onClick={() => setOpen(o)}>
+              <Card>
+                <p className="text-[15px] font-bold text-ink">{o.title}</p>
+                <p className="text-[13px] text-muted">
+                  {o.provider?.displayName} · đang hiển thị
+                </p>
+                <p className="mt-1 text-[12px] text-muted">
+                  {TYPE_LABEL[o.type]} · {o.deadlineAt ? `hạn ${formatDate(o.deadlineAt)}` : "không có hạn"}
+                </p>
+              </Card>
+            </button>
+          ))}
+        </>
+      )}
       <BottomSheet
         open={open !== null}
         onClose={() => setOpen(null)}
-        title="Xem xét tin đăng"
+        title={live ? "Hậu kiểm tin đã đăng" : "Xem xét tin đăng"}
         footer={
-          <div className="grid grid-cols-2 gap-3">
-            <Button variant="danger" disabled={state.pending} onClick={() => decide("REJECTED")}>
-              Từ chối
+          live ? (
+            <Button variant="danger" block disabled={state.pending} onClick={() => decide("REJECTED")}>
+              Gỡ tin
             </Button>
-            <Button disabled={state.pending} onClick={() => decide("VERIFIED")}>
-              Xác minh
-            </Button>
-          </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              <Button variant="danger" disabled={state.pending} onClick={() => decide("REJECTED")}>
+                Từ chối
+              </Button>
+              <Button disabled={state.pending} onClick={() => decide("VERIFIED")}>
+                Xác minh
+              </Button>
+            </div>
+          )
         }
       >
         {open && (
@@ -84,7 +111,7 @@ function Queue() {
                 Liên kết: <span className="text-ink">{open.externalUrl}</span>
               </p>
             )}
-            <TextArea label="Lý do (bắt buộc khi từ chối)" value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} />
+            <TextArea label={live ? "Lý do gỡ tin (bắt buộc)" : "Lý do (bắt buộc khi từ chối)"} value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} />
             <FormError message={state.error} />
           </div>
         )}

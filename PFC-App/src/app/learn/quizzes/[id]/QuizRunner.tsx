@@ -1,8 +1,9 @@
 "use client";
 
+import { Timer } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
-import { submitAttemptAction } from "@/modules/education/server/actions";
+import { useEffect, useRef, useState } from "react";
+import { startAttemptAction, submitAttemptAction } from "@/modules/education/server/actions";
 import { Button } from "@/ui";
 import { ConfirmSheet } from "@/ui/ConfirmSheet";
 import { FormError } from "@/ui/Form";
@@ -11,22 +12,79 @@ import { useAction } from "@/ui/use-action";
 import { cx } from "@/ui/cx";
 
 /** One question per screen (mockup 44: "Câu 3/10", A–D options, prev/next). */
-export function QuizRunner({ quizId, questions, passPct }: { quizId: string; questions: Array<{ id: string; prompt: string; options: string[] }>; passPct: number }) {
+export function QuizRunner({
+  quizId,
+  questions,
+  passPct,
+  timeLimitMin = null,
+}: {
+  quizId: string;
+  questions: Array<{ id: string; prompt: string; options: string[] }>;
+  passPct: number;
+  timeLimitMin?: number | null;
+}) {
   const router = useRouter();
   const [i, setI] = useState(0);
   const [answers, setAnswers] = useState<Record<string, number>>({});
   const [confirm, setConfirm] = useState(false);
+  const [deadline, setDeadline] = useState<number | null>(null);
+  const [left, setLeft] = useState<number | null>(null);
   const { run, pending, error } = useAction();
+  const start = useAction();
+  const latest = useRef(answers);
+  latest.current = answers;
+  const autoSubmitted = useRef(false);
   const q = questions[i];
   const answered = Object.keys(answers).length;
   const last = i === questions.length - 1;
 
   function submit() {
-    run(() => submitAttemptAction(quizId, answers), (attemptId) => router.replace(`/learn/quizzes/attempts/${attemptId}`));
+    run(() => submitAttemptAction(quizId, latest.current), (attemptId) => router.replace(`/learn/quizzes/attempts/${attemptId}`));
   }
+
+  // Timed quiz: count down from the server deadline; submit what is answered when time runs out.
+  useEffect(() => {
+    if (deadline === null) return;
+    const tick = () => {
+      const ms = deadline - Date.now();
+      setLeft(Math.max(0, ms));
+      if (ms <= 0 && !autoSubmitted.current) {
+        autoSubmitted.current = true;
+        submit();
+      }
+    };
+    tick();
+    const t = setInterval(tick, 500);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deadline]);
+
+  if (timeLimitMin && deadline === null) {
+    return (
+      <div className="px-4 pt-4 text-center">
+        <Timer size={44} className="mx-auto text-primary" />
+        <p className="mt-2 text-[17px] font-bold text-ink">Bài thi tính giờ: {timeLimitMin} phút</p>
+        <p className="mt-1 text-[14px] text-muted">
+          {questions.length} câu · đạt từ {passPct}%. Hết giờ, bài được nộp tự động với các câu đã trả lời.
+        </p>
+        <Button className="mt-4" block disabled={start.pending} onClick={() => start.run(() => startAttemptAction(quizId), (r) => r.deadline && setDeadline(Date.parse(r.deadline)))}>
+          {start.pending ? "Đang bắt đầu…" : "Bắt đầu làm bài"}
+        </Button>
+        <div className="mt-3">
+          <FormError message={start.error} />
+        </div>
+      </div>
+    );
+  }
+  const mm = left === null ? "" : `${String(Math.floor(left / 60000)).padStart(2, "0")}:${String(Math.floor((left % 60000) / 1000)).padStart(2, "0")}`;
 
   return (
     <div className="px-4">
+      {left !== null && (
+        <p role="timer" aria-live="off" className={cx("mb-2 flex items-center justify-center gap-1 rounded-full py-1.5 text-[15px] font-bold", left < 60_000 ? "bg-expense-soft text-expense" : "bg-primary-soft text-primary")}>
+          <Timer size={16} /> Còn {mm}
+        </p>
+      )}
       <div className="flex items-center justify-between text-[13px] font-semibold text-ink-2">
         <span>
           Câu {i + 1}/{questions.length}

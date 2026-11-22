@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { ShoppingBag } from "lucide-react";
 import { CATEGORIES } from "@/modules/market/domain/orders";
-import { listPublished } from "@/modules/market/server/service";
+import { LISTING_TYPES } from "@/modules/market/domain/listings";
+import { listPublished, popularTags } from "@/modules/market/server/service";
 import { CATEGORY_ICON, ListingCard } from "@/modules/market/ui/ListingCard";
 import { AppHeader, EmptyState } from "@/ui";
 import { FilterChips } from "@/ui/FilterChips";
@@ -11,12 +12,12 @@ import { cx } from "@/ui/cx";
 export const dynamic = "force-dynamic";
 
 /** MKT-01 Home · MKT-02 Listing · MKT-03 Category · MKT-04 Search (mockup 58 / 127). */
-export default async function MarketHome({ searchParams }: { searchParams: Promise<{ q?: string; category?: string; sort?: string }> }) {
-  const { q, category, sort } = await searchParams;
-  const items = await listPublished({ q: q?.slice(0, 80), category, sort });
+export default async function MarketHome({ searchParams }: { searchParams: Promise<{ q?: string; category?: string; sort?: string; kind?: string; tag?: string }> }) {
+  const { q, category, sort, kind, tag } = await searchParams;
+  const [items, tags] = await Promise.all([listPublished({ q: q?.slice(0, 80), category, sort, kind, tag: tag?.slice(0, 24) }), popularTags()]);
   const qs = (patch: Record<string, string | undefined>) => {
     const p = new URLSearchParams();
-    const merged = { q, category, sort, ...patch };
+    const merged = { q, category, sort, kind, tag, ...patch };
     for (const [k, v] of Object.entries(merged)) if (v) p.set(k, v);
     return `/market?${p.toString()}`;
   };
@@ -39,6 +40,15 @@ export default async function MarketHome({ searchParams }: { searchParams: Promi
             );
           })}
         </nav>
+        <FilterChips
+          label="Loại tin"
+          value={kind && kind in LISTING_TYPES ? kind : ""}
+          hrefFor={(k) => qs({ kind: k || undefined })}
+          options={[{ value: "", label: "Mọi loại" }, ...Object.entries(LISTING_TYPES).map(([value, t]) => ({ value, label: t.label }))]}
+        />
+        {tags.length > 0 && (
+          <FilterChips label="Tag" value={tag ?? ""} hrefFor={(t) => qs({ tag: t || undefined })} options={[{ value: "", label: "Mọi tag" }, ...tags.map((t) => ({ value: t, label: `#${t}` }))]} />
+        )}
         <FilterChips
           label="Sắp xếp"
           value={sort === "price_asc" || sort === "price_desc" ? sort : "newest"}

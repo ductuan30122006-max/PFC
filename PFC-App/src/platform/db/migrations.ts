@@ -852,4 +852,217 @@ export const MIGRATIONS: ReadonlyArray<{ version: number; statements: string[]; 
       `CREATE UNIQUE INDEX mkt_orders_checkout ON mkt_orders(buyer_id, seller_id, checkout_key)`,
     ],
   },
+  {
+    version: 13,
+    statements: [
+      // G6 Finance: investment tracker (owner-only; prices are entered by the member, no market feed).
+      `CREATE TABLE fin_holdings (
+        id TEXT PRIMARY KEY,
+        member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        symbol TEXT NOT NULL DEFAULT '',
+        kind TEXT NOT NULL CHECK (kind IN ('stock','fund','bond','gold','crypto','deposit','other')),
+        quantity REAL NOT NULL CHECK (quantity > 0),
+        avg_cost INTEGER NOT NULL CHECK (avg_cost >= 0),
+        current_price INTEGER NOT NULL CHECK (current_price >= 0),
+        price_updated_at TEXT NOT NULL,
+        note TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )`,
+      `CREATE INDEX fin_holdings_member ON fin_holdings (member_id)`,
+      // G6 Finance: "Ngon – Bổ – Rẻ" places shared by members (FIN-26…34), with reviews.
+      `CREATE TABLE fin_places (
+        id TEXT PRIMARY KEY,
+        author_id TEXT NOT NULL REFERENCES members(id),
+        name TEXT NOT NULL,
+        category TEXT NOT NULL CHECK (category IN ('food','drink','study','shopping','service','other')),
+        address TEXT NOT NULL,
+        area TEXT NOT NULL DEFAULT '',
+        price_level INTEGER NOT NULL CHECK (price_level BETWEEN 1 AND 3),
+        description TEXT NOT NULL DEFAULT '',
+        cover_url TEXT,
+        hidden INTEGER NOT NULL DEFAULT 0,
+        hidden_reason TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )`,
+      `CREATE INDEX fin_places_cat ON fin_places (category, created_at)`,
+      `CREATE TABLE fin_place_reviews (
+        id TEXT PRIMARY KEY,
+        place_id TEXT NOT NULL REFERENCES fin_places(id) ON DELETE CASCADE,
+        member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        rating INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5),
+        comment TEXT NOT NULL DEFAULT '',
+        avg_spend INTEGER CHECK (avg_spend IS NULL OR avg_spend >= 0),
+        created_at TEXT NOT NULL,
+        UNIQUE (place_id, member_id)
+      )`,
+      `CREATE TABLE fin_place_saves (
+        place_id TEXT NOT NULL REFERENCES fin_places(id) ON DELETE CASCADE,
+        member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (place_id, member_id)
+      )`,
+      // G6 Education: timed quizzes (server-side clock per attempt).
+      `ALTER TABLE edu_quizzes ADD COLUMN time_limit_min INTEGER`,
+      `CREATE TABLE edu_attempt_starts (
+        quiz_id TEXT NOT NULL REFERENCES edu_quizzes(id) ON DELETE CASCADE,
+        member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        started_at TEXT NOT NULL,
+        PRIMARY KEY (quiz_id, member_id)
+      )`,
+      // G6 Projects: collaborator profiles ("Tìm cộng sự").
+      `CREATE TABLE prj_collab_profiles (
+        member_id TEXT PRIMARY KEY REFERENCES members(id) ON DELETE CASCADE,
+        headline TEXT NOT NULL,
+        skills TEXT NOT NULL DEFAULT '',
+        looking_for TEXT NOT NULL DEFAULT '',
+        availability TEXT NOT NULL DEFAULT 'part_time' CHECK (availability IN ('few_hours','part_time','full_time')),
+        open INTEGER NOT NULL DEFAULT 1,
+        updated_at TEXT NOT NULL
+      )`,
+      // G7 Rewards: append-only points ledger (idempotent per rule + reference), catalog, redemptions, referrals.
+      `CREATE TABLE pts_ledger (
+        id TEXT PRIMARY KEY,
+        member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        delta INTEGER NOT NULL CHECK (delta != 0),
+        kind TEXT NOT NULL CHECK (kind IN ('earn','redeem','refund','adjust')),
+        rule_key TEXT,
+        ref TEXT,
+        note TEXT NOT NULL DEFAULT '',
+        created_by TEXT,
+        created_at TEXT NOT NULL
+      )`,
+      `CREATE UNIQUE INDEX pts_ledger_once ON pts_ledger (member_id, rule_key, ref) WHERE rule_key IS NOT NULL AND ref IS NOT NULL`,
+      `CREATE INDEX pts_ledger_member ON pts_ledger (member_id, created_at)`,
+      `CREATE TABLE pts_rewards (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        partner TEXT NOT NULL DEFAULT '',
+        cost INTEGER NOT NULL CHECK (cost > 0),
+        stock INTEGER CHECK (stock IS NULL OR stock >= 0),
+        min_tier TEXT,
+        active INTEGER NOT NULL DEFAULT 1,
+        created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )`,
+      `CREATE TABLE pts_redemptions (
+        id TEXT PRIMARY KEY,
+        reward_id TEXT NOT NULL REFERENCES pts_rewards(id),
+        member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        cost INTEGER NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('requested','fulfilled','cancelled')),
+        note TEXT NOT NULL DEFAULT '',
+        decided_by TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )`,
+      `CREATE TABLE pts_codes (
+        member_id TEXT PRIMARY KEY REFERENCES members(id) ON DELETE CASCADE,
+        code TEXT NOT NULL UNIQUE
+      )`,
+      `CREATE TABLE pts_referrals (
+        referee_id TEXT PRIMARY KEY REFERENCES members(id) ON DELETE CASCADE,
+        referrer_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        rewarded INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+      )`,
+      // G8 Admin: settings / feature flags, member restrictions, support tickets, notification campaigns.
+      `CREATE TABLE app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_by TEXT,
+        updated_at TEXT NOT NULL
+      )`,
+      `CREATE TABLE member_restrictions (
+        id TEXT PRIMARY KEY,
+        member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL CHECK (kind IN ('community','messages','market_sell','events_host')),
+        reason TEXT NOT NULL,
+        until TEXT,
+        created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        lifted_at TEXT,
+        lifted_by TEXT
+      )`,
+      `CREATE INDEX member_restrictions_member ON member_restrictions (member_id, kind)`,
+      `CREATE TABLE support_tickets (
+        id TEXT PRIMARY KEY,
+        member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+        category TEXT NOT NULL,
+        subject TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('open','answered','closed')),
+        assignee_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )`,
+      `CREATE INDEX support_tickets_status ON support_tickets (status, updated_at)`,
+      `CREATE TABLE support_messages (
+        id TEXT PRIMARY KEY,
+        ticket_id TEXT NOT NULL REFERENCES support_tickets(id) ON DELETE CASCADE,
+        author_id TEXT NOT NULL,
+        staff INTEGER NOT NULL DEFAULT 0,
+        body TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )`,
+      `CREATE TABLE notify_campaigns (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL DEFAULT '',
+        href TEXT,
+        audience TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('draft','sent')),
+        recipients INTEGER NOT NULL DEFAULT 0,
+        created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        sent_at TEXT
+      )`,
+    ],
+  },
+  {
+    version: 14,
+    rebuild: true,
+    statements: [
+      // Marketplace listings: event tickets (Shared Event Engine), links to an Education course or an event,
+      // tags and an explicit currency. SQLite cannot alter the kind CHECK, so the table is rebuilt (rows kept).
+      `CREATE TABLE mkt_listings_new (
+        id TEXT PRIMARY KEY,
+        seller_id TEXT NOT NULL REFERENCES members(id),
+        kind TEXT NOT NULL CHECK (kind IN ('product','digital','service','course','ticket')),
+        category TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        price INTEGER NOT NULL CHECK (price >= 0),
+        currency TEXT NOT NULL DEFAULT 'VND' CHECK (currency = 'VND'),
+        stock INTEGER CHECK (stock IS NULL OR stock >= 0),
+        delivery TEXT NOT NULL CHECK (delivery IN ('ship','pickup','online')),
+        status TEXT NOT NULL DEFAULT 'draft',
+        reject_reason TEXT,
+        images TEXT NOT NULL DEFAULT '[]',
+        tags TEXT NOT NULL DEFAULT '',
+        course_id TEXT REFERENCES edu_courses(id) ON DELETE SET NULL,
+        event_id TEXT REFERENCES evt_events(id) ON DELETE SET NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )`,
+      `INSERT INTO mkt_listings_new (id, seller_id, kind, category, title, description, price, stock, delivery, status, reject_reason, images, created_at, updated_at)
+       SELECT id, seller_id, kind, category, title, description, price, stock, delivery, status, reject_reason, images, created_at, updated_at FROM mkt_listings`,
+      `DROP TABLE mkt_listings`,
+      `ALTER TABLE mkt_listings_new RENAME TO mkt_listings`,
+      `CREATE INDEX mkt_listings_status ON mkt_listings(status, kind)`,
+      `CREATE INDEX mkt_listings_seller ON mkt_listings(seller_id, updated_at)`,
+      // Risk-based seller verification: "basic" (self-serve, low-risk items) and "verified" (reviewed by staff).
+      `ALTER TABLE mkt_sellers ADD COLUMN level TEXT NOT NULL DEFAULT 'basic'`,
+      `ALTER TABLE mkt_sellers ADD COLUMN verify_status TEXT NOT NULL DEFAULT 'none'`,
+      `ALTER TABLE mkt_sellers ADD COLUMN verify_note TEXT NOT NULL DEFAULT ''`,
+      `ALTER TABLE mkt_sellers ADD COLUMN legal_name TEXT NOT NULL DEFAULT ''`,
+      `ALTER TABLE mkt_sellers ADD COLUMN phone TEXT NOT NULL DEFAULT ''`,
+      `UPDATE mkt_sellers SET level = 'verified' WHERE status = 'approved'`,
+      // Education: member uploads (PDF documents) and replies to forum comments.
+      `ALTER TABLE edu_replies ADD COLUMN parent_id TEXT`,
+    ],
+  },
 ];

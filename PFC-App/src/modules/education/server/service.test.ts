@@ -19,10 +19,10 @@ beforeAll(async () => {
 afterAll(cleanupTempDbs);
 
 describe("courses: who can create, review and see what", () => {
-  it("members and non-CM heads cannot create learning content", async () => {
-    const input = { title: "X", topic: "finance", level: "basic" };
-    await expect(edu.createCourse(member, input)).rejects.toThrow(/Chủ nhiệm/);
-    await expect(edu.createCourse(headTT, input)).rejects.toThrow(/Chủ nhiệm/);
+  it("any member may draft content, but only approvers publish it", async () => {
+    const draft = await edu.createCourse(member2, { title: "Khóa của thành viên", topic: "finance", level: "basic" });
+    expect(await edu.getCourse(member, draft)).toBeNull(); // drafts stay private
+    await expect(edu.transition(member2, "course", draft, "approve")).rejects.toThrow(/quyền/);
   });
 
   it("Trưởng ban CM creates a course; drafts are invisible to members", async () => {
@@ -132,9 +132,11 @@ describe("forum moderation", () => {
 });
 
 describe("resources", () => {
-  it("only https links, only creators, review applies", async () => {
-    await expect(edu.saveResource(member, null, { title: "x", kind: "ebook", topic: "finance", url: "https://a.b/c" })).rejects.toThrow(/Chủ nhiệm/);
+  it("https links or the member's own PDF; member uploads go to review", async () => {
     await expect(edu.saveResource(headCM, null, { title: "x", kind: "ebook", topic: "finance", url: "http://a.b/c" })).rejects.toThrow();
+    await expect(edu.saveResource(member, null, { title: "Ebook", kind: "ebook", topic: "finance", url: "/api/files/document/00000000-0000-0000-0000-000000000000.pdf" })).rejects.toThrow(/không phải của bạn/);
+    const mine = await edu.saveResource(member, null, { title: "Checklist tiết kiệm", kind: "checklist", topic: "finance", url: "https://docs.google.com/document/d/x" });
+    expect(await edu.transition(member, "resource", mine, "submit")).toBe("submitted");
     const id = await edu.saveResource(headCM, null, { title: "Template ngân sách", kind: "template", topic: "finance", url: "https://docs.google.com/spreadsheets/d/x" });
     expect(await edu.transition(headCM, "resource", id, "submit")).toBe("published");
     expect((await edu.listPublishedResources()).map((r) => r.id)).toContain(id);
@@ -142,11 +144,24 @@ describe("resources", () => {
 });
 
 describe("content management overview", () => {
-  it("lists own content and the review queue for approvers; nothing for members", async () => {
+  it("lists own content and the review queue for approvers; members see only their own", async () => {
     const o = await edu.manageOverview(headCM);
     expect(o.canCreate && o.canApprove).toBe(true);
     expect(o.mine.length).toBeGreaterThan(0);
+    expect(o.queue.length).toBeGreaterThan(0);
     const m = await edu.manageOverview(member);
-    expect(m).toEqual({ mine: [], queue: [], canCreate: false, canApprove: false });
+    expect(m.canCreate).toBe(true);
+    expect(m.canApprove).toBe(false);
+    expect(m.queue).toEqual([]);
+    expect(m.mine.every((x) => x.authorName === "Thành viên A")).toBe(true);
+  });
+  it("forum: anyone replies to a comment; the comment author is notified", async () => {
+    const t = await edu.createThread(member, { topic: "question", title: "Nên mở tài khoản chứng khoán ở đâu?", body: "Mình là sinh viên năm 2, muốn tìm hiểu." });
+    await edu.reply(member2, t, "Bạn xem phí giao dịch và app có dễ dùng không nhé.");
+    const first = (await edu.getThread(member, t))!.replies[0];
+    await edu.reply(headCM, t, "Đồng ý, thêm nữa là phí lưu ký.", first.id);
+    const th = (await edu.getThread(member, t))!;
+    expect(th.replies.find((r) => r.body.startsWith("Đồng ý"))?.parentId).toBe(first.id);
+    await expect(edu.reply(member, t, "x", "not-a-reply")).rejects.toThrow(/không còn/);
   });
 });

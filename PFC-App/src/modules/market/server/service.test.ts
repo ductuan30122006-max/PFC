@@ -22,17 +22,29 @@ beforeAll(async () => {
 });
 afterAll(cleanupTempDbs);
 
-describe("sellers", () => {
-  it("must be approved before listing anything", async () => {
+describe("sellers (risk-based verification)", () => {
+  it("a verified email opens a basic shop at once; unverified accounts cannot sell", async () => {
     await expect(mkt.createListing(seller, LISTING)).rejects.toThrow(/đăng ký/);
-    expect(await mkt.registerSeller(seller, { shopName: "Nhà sách Minh", contact: "Zalo 0901234567" })).toBe("pending");
-    await expect(mkt.createListing(seller, LISTING)).rejects.toThrow(/chờ duyệt/);
+    await expect(mkt.registerSeller(seller, { shopName: "Nhà sách Minh", contact: "Zalo 0901234567" })).rejects.toThrow(/Xác thực email/);
+    await run("UPDATE members SET email_verified_at = ? WHERE id IN (?, ?)", [new Date().toISOString(), seller.id, buyer.id]);
+    expect(await mkt.registerSeller(seller, { shopName: "Nhà sách Minh", contact: "Zalo 0901234567" })).toBe("approved");
+    expect((await mkt.getSeller(seller.id))?.level).toBe("basic");
   });
-  it("only Chủ nhiệm / Ban điều hành approve sellers", async () => {
-    await expect(mkt.decideSeller(buyer, seller.id, "approve")).rejects.toThrow(/quyền/);
-    await expect(mkt.decideSeller(headTT, seller.id, "approve")).rejects.toThrow(/quyền/);
-    await mkt.decideSeller(owner, seller.id, "approve");
-    expect((await mkt.getSeller(seller.id))?.status).toBe("approved");
+  it("basic shops cannot list high-risk types or prices above the cap until staff verify them", async () => {
+    await expect(mkt.createListing(seller, { ...LISTING, kind: "service", delivery: "online" })).rejects.toThrow(/xác minh/);
+    await expect(mkt.createListing(seller, { ...LISTING, price: 5_000_000 })).rejects.toThrow(/2\.000\.000/);
+    await expect(mkt.requestVerification(seller, { legalName: "Nguyễn Văn Minh", phone: "12345", note: "Dạy kèm Excel tài chính" })).rejects.toThrow(/điện thoại/);
+    await mkt.requestVerification(seller, { legalName: "Nguyễn Văn Minh", phone: "0901 234 567", note: "Dạy kèm Excel tài chính" });
+    expect((await mkt.verificationQueue(owner)).map((s) => s.memberId)).toContain(seller.id);
+    await expect(mkt.decideVerification(headTT, seller.id, true)).rejects.toThrow(/quyền/);
+    await expect(mkt.decideVerification(owner, seller.id, false)).rejects.toThrow(/lý do/);
+    await mkt.decideVerification(owner, seller.id, true);
+    expect((await mkt.getSeller(seller.id))?.level).toBe("verified");
+    expect(await mkt.createListing(seller, { ...LISTING, kind: "service", delivery: "online", title: "Kèm Excel tài chính 1-1" })).toBeTruthy();
+  });
+  it("suspension still needs Chủ nhiệm / Ban điều hành", async () => {
+    await expect(mkt.decideSeller(buyer, seller.id, "suspend", "x")).rejects.toThrow(/quyền/);
+    await expect(mkt.decideSeller(headTT, seller.id, "suspend", "x")).rejects.toThrow(/quyền/);
   });
 });
 
@@ -45,8 +57,13 @@ describe("listings", () => {
     expect(await mkt.listingTransition(headTT, listingId, "approve")).toBe("published");
     expect((await mkt.listPublished()).map((l) => l.id)).toContain(listingId);
   });
-  it("validates content (digital must be online) and owner-only edits", async () => {
-    await expect(mkt.createListing(seller, { ...LISTING, kind: "digital", delivery: "ship" })).rejects.toThrow(/trực tuyến/);
+  it("links courses / tickets only to the seller's own published items; tags are normalized; owner-only edits", async () => {
+    await expect(mkt.createListing(seller, { ...LISTING, kind: "course" })).rejects.toThrow(/khóa học/);
+    await expect(mkt.createListing(seller, { ...LISTING, kind: "ticket", eventId: "nope" })).rejects.toThrow(/sự kiện do bạn tổ chức/);
+    const digital = await mkt.createListing(seller, { ...LISTING, kind: "digital", delivery: "ship", title: "Template ngân sách", tags: ["#Excel", "excel", "Tài chính"] });
+    const d = await mkt.getListing(seller, digital);
+    expect(d).toMatchObject({ delivery: "online", tags: ["excel", "tài chính"], currency: "VND" });
+    await mkt.deleteListing(seller, digital);
     await expect(mkt.updateListing(buyer, listingId, LISTING)).rejects.toThrow(/của mình/);
     await expect(mkt.deleteListing(buyer, listingId)).rejects.toThrow(/của mình/);
   });

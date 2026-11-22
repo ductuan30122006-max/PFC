@@ -30,9 +30,18 @@ export default async function ThreadPage({ params }: { params: Promise<{ id: str
       </div>
       <Section title={`Bình luận (${t.replies.length})`}>
         <ul className="space-y-3">
-          {t.replies.map((r) => (
-            <ReplyItem key={r.id} r={r} canModerate={t.canModerate} />
-          ))}
+          {t.replies
+            .filter((r) => !r.parentId)
+            .map((r) => (
+              <ReplyItem
+                key={r.id}
+                r={r}
+                canModerate={t.canModerate}
+                threadId={t.id}
+                canReply={!!me && !t.locked}
+                replies={t.replies.filter((c) => c.parentId === r.id)}
+              />
+            ))}
         </ul>
         {me ? (
           t.locked ? (

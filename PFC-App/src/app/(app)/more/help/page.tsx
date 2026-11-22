@@ -33,7 +33,7 @@ export default async function HelpPage({ searchParams }: { searchParams: Promise
       </div>
       <Section>
         {items.length === 0 ? (
-          <p className="text-[14px] text-muted">Không có câu hỏi phù hợp. Hãy hỏi Ban điều hành PFC trong Câu lạc bộ.</p>
+          <p className="text-[14px] text-muted">Không có câu hỏi phù hợp. Hãy gửi yêu cầu hỗ trợ bên dưới.</p>
         ) : (
           <ul className="divide-y divide-line overflow-hidden rounded-[var(--radius-card)] border border-line bg-surface">
             {items.map((f) => (
@@ -54,6 +54,12 @@ export default async function HelpPage({ searchParams }: { searchParams: Promise
             ))}
           </ul>
         )}
+      </Section>
+      <Section title="Cần thêm trợ giúp?">
+        <Link href="/more/support" className="pressable flex min-h-12 items-center justify-between rounded-[var(--radius-card)] border border-line bg-surface px-4 py-3 text-[15px] font-semibold text-ink">
+          Gửi yêu cầu hỗ trợ cho Ban điều hành <span className="text-primary">→</span>
+        </Link>
+        <div className="h-6" />
       </Section>
     </>
   );

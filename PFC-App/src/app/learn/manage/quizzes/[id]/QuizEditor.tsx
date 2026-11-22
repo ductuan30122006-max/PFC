@@ -18,6 +18,7 @@ type Quiz = {
   description: string;
   topic: string;
   passPct: number;
+  timeLimitMin: number | null;
   status: ContentStatus;
   rejectReason: string | null;
   canEdit: boolean;
@@ -28,7 +29,7 @@ type Quiz = {
 
 export function QuizEditor({ quiz }: { quiz: Quiz }) {
   const router = useRouter();
-  const [info, setInfo] = useState({ title: quiz.title, description: quiz.description, topic: quiz.topic, passPct: String(quiz.passPct) });
+  const [info, setInfo] = useState({ title: quiz.title, description: quiz.description, topic: quiz.topic, passPct: String(quiz.passPct), timeLimitMin: quiz.timeLimitMin ? String(quiz.timeLimitMin) : "" });
   const [editing, setEditing] = useState<Q | null>(null);
   const infoAct = useAction();
   const qAct = useAction();
@@ -67,9 +68,10 @@ export function QuizEditor({ quiz }: { quiz: Quiz }) {
             </SelectInput>
             <TextInput label="Điểm đạt (%)" type="number" inputMode="numeric" value={info.passPct} onChange={(e) => setInfo({ ...info, passPct: e.target.value })} />
           </div>
+          <TextInput label="Thời gian làm bài (phút)" hint="Bỏ trống = không giới hạn" inputMode="numeric" value={info.timeLimitMin} onChange={(e) => setInfo({ ...info, timeLimitMin: e.target.value.replace(/\D/g, "") })} />
           <FormError message={infoAct.error} />
           {quiz.canEdit && (
-            <Button variant="secondary" block disabled={infoAct.pending} onClick={() => infoAct.run(() => updateQuizAction(quiz.id, { ...info, passPct: Number(info.passPct) }))}>
+            <Button variant="secondary" block disabled={infoAct.pending} onClick={() => infoAct.run(() => updateQuizAction(quiz.id, { ...info, passPct: Number(info.passPct), timeLimitMin: info.timeLimitMin ? Number(info.timeLimitMin) : null }))}>
               {infoAct.pending ? "Đang lưu…" : "Lưu thông tin"}
             </Button>
           )}

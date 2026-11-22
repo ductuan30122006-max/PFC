@@ -59,7 +59,7 @@ function Account({ name, email, role }: { name: string; email: string; role: key
       {(role === "PROVIDER" || role === "REVIEWER") && (
         <Section>
           <ListGroup label="Quản lý">
-            {role === "PROVIDER" && (
+            {(role === "PROVIDER" || role === "REVIEWER") && (
               <ListItem icon={Building2} title="Tin đăng của tôi" description="Tạo tin, gửi xác minh, xem ứng viên" href="/opportunities/provider" />
             )}
             {role === "REVIEWER" && (

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Bell, ChevronRight, CircleHelp, CreditCard, MessageCircle, Ticket, FileText, Info, LayoutGrid, LogOut, Settings, ShieldCheck, UserCog, UserRound } from "lucide-react";
+import { Bell, ChevronRight, CircleHelp, CreditCard, Gift, LayoutDashboard, LifeBuoy, MessageCircle, Ticket, FileText, Info, LayoutGrid, LogOut, Settings, ShieldCheck, UserCog, UserRound } from "lucide-react";
 import { DEPARTMENT_LABEL, ROLE_LABEL, can } from "@/platform/roles";
 import { logoutAction } from "@/platform/auth/actions";
 import { currentMember, toActor } from "@/platform/auth/session";
@@ -100,8 +100,11 @@ export default async function MorePage() {
             <ListItem icon={Settings} title="Cài đặt tài khoản" description="Bảo mật, thiết bị, quyền riêng tư, dữ liệu" href="/more/account" />
             <ListItem icon={Bell} title="Thông báo" href="/notifications" trailing={unread > 0 ? <Badge tone="expense">{unread}</Badge> : undefined} />
             <ListItem icon={MessageCircle} title="Tin nhắn" href="/messages" />
+            <ListItem icon={Gift} title="Điểm thưởng & hạng thành viên" description="Tích điểm, đổi quà, giới thiệu bạn bè" href="/rewards" />
             <ListItem icon={Ticket} title="Vé sự kiện của tôi" href="/events/tickets" />
             <ListItem icon={CreditCard} title="Thanh toán & hoàn tiền" description="Lịch sử giao dịch VNPAY, hoàn tiền, chi trả" href="/payments" />
+            {can(toActor(me), "admin.dashboard") && <ListItem icon={LayoutDashboard} title="Quản trị" description="Bảng điều khiển, hàng chờ, nhật ký, cấu hình" href="/admin" />}
+            <ListItem icon={LifeBuoy} title="Hỗ trợ" description="Yêu cầu hỗ trợ của bạn" href="/more/support" />
             {can(toActor(me), "admin.members.view") && <ListItem icon={UserCog} title="Quản lý tài khoản" description="Vai trò, khóa tài khoản" href="/more/admin" />}
           </ListGroup>
         </Section>

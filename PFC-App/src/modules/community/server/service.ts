@@ -1,4 +1,6 @@
 import "server-only";
+import { awardPoints } from "@/modules/rewards/server/service";
+import { assertAllowed } from "@/platform/admin/restrictions";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { all, one, run } from "@/platform/db/client";
@@ -65,6 +67,7 @@ const groupSchema = z.object({
 
 /** COM-14 Create Club/Group. The creator becomes owner. 5 new groups / day / member. */
 export async function createGroup(actor: Actor, input: unknown): Promise<string> {
+  await assertAllowed(actor.id, "community", "community");
   const d = groupSchema.parse(input);
   if (!(await allowAttempt(`group-create:${actor.id}`, 5, 24 * 3600_000))) throw new ActionError("Bạn đã tạo quá nhiều nhóm hôm nay.", "rate_limited");
   const [cover] = d.coverUrl ? await verifyOwnUploadUrls(actor, "post", [d.coverUrl], 1) : [null];
@@ -246,6 +249,7 @@ async function postGroupVisible(groupId: string | null, actor: Actor | null): Pr
 
 /** COM-04 Create Post (mockup 76): in "Mọi người" or a group the author belongs to. 20 posts / hour. */
 export async function createPost(actor: Actor, input: unknown): Promise<string> {
+  await assertAllowed(actor.id, "community", "community");
   const d = postSchema.parse(input);
   if (!(await allowAttempt(`post:${actor.id}`, 20, 3600_000))) throw new ActionError("Bạn đăng quá nhanh. Thử lại sau ít phút.", "rate_limited");
   if (d.groupId) {
@@ -266,6 +270,7 @@ export async function createPost(actor: Actor, input: unknown): Promise<string> 
   for (const [i, label] of poll.entries()) {
     await run("INSERT INTO com_poll_options (id, post_id, label, position) VALUES (?, ?, ?, ?)", [randomUUID(), id, label, i]);
   }
+  if (!d.draft) await awardPoints(actor.id, "post_create", id);
   return id;
 }
 
@@ -491,6 +496,7 @@ export async function vote(actor: Actor, postId: string, optionId: string): Prom
 
 /** COM-06 Comment. 30 comments / 10 minutes. */
 export async function addComment(actor: Actor, postId: string, body: unknown, parentId?: string | null): Promise<string> {
+  await assertAllowed(actor.id, "community", "community");
   const text = z.string().trim().min(1, "Nhập bình luận.").max(2000).parse(body);
   const p = await requireReadable(actor, postId);
   if (!p.allow_comments) throw new ActionError("Bài viết đã tắt bình luận.");

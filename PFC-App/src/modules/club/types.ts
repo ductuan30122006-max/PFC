@@ -54,6 +54,11 @@ export type Activity = {
   endsAt?: string | null;
   capacity?: number | null;
   participantCount?: number | null;
+  coverUrl?: string | null;
+  mediaUrls?: string[];
+  bodyMd?: string;
+  registerDeadline?: string | null;
+  hostTeamId?: string | null;
 };
 
 export type LinkedEvent = {
@@ -114,7 +119,10 @@ export type TaskDetail = {
   checklist: Array<{ id: string; title: string; done: boolean }>;
   comments: Array<{ id: string; body: string; createdAt: string | number; authorName: string | null }>;
   activity?: Array<{ id: string; action?: string; createdAt: string | number }>;
+  attachments?: TaskAttachment[];
 };
+
+export type TaskAttachment = { id: string; name: string; url: string; mimeType: string; sizeBytes: number; uploaderId: string; uploaderName: string | null; createdAt: number };
 
 export const POSITION_LABEL: Record<Position, string> = {
   owner: "Chủ nhiệm",

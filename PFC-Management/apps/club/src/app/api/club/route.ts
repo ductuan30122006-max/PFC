@@ -302,6 +302,21 @@ export async function GET(req: Request) {
       return NextResponse.json({ ok: true, ...profile, correlationId });
     }
 
+    // Join status for people who cannot see the private club yet: none / pending / rejected / left.
+    if (action === "my_join_status") {
+      const club = clubs.getPrimaryClub();
+      const m = clubs.getMyMembership(club.id, user.id);
+      return NextResponse.json({
+        ok: true,
+        club: { id: club.id, name: club.name },
+        status: m?.status ?? "none",
+        joinReason: m?.joinReason ?? null,
+        rejectReason: m?.status === "rejected" ? (m.rejectReason ?? null) : null,
+        updatedAt: m?.updatedAt ?? null,
+        correlationId,
+      });
+    }
+
     const primary = clubs.getPrimaryClub();
     const clubId = url.searchParams.get("clubId") ?? primary.id;
     clubs.assertCanViewClub(user, clubId);
@@ -744,6 +759,18 @@ export async function POST(req: Request) {
               Number(body.progress),
             ),
           };
+        case "add_task_attachment":
+          return {
+            attachmentId: tasks.addTaskAttachment(user, String(body.taskId), {
+              name: String(body.name ?? ""),
+              url: String(body.url ?? ""),
+              mimeType: String(body.mimeType ?? ""),
+              sizeBytes: Number(body.sizeBytes ?? 0),
+            }),
+          };
+        case "remove_task_attachment":
+          tasks.removeTaskAttachment(user, String(body.attachmentId));
+          return { ok: true };
         case "add_task_comment":
           return {
             commentId: tasks.addTaskComment(

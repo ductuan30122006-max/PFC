@@ -27,9 +27,10 @@ export async function mustReviewer(): Promise<string | NextResponse> {
 
 export async function getProviderProfileId(): Promise<string | null> {
   const user = await getAuthUser();
-  if (!user || user.role !== "PROVIDER") return null;
+  // Providers post; reviewers (Ban điều hành PFC) may also post through their platform profile.
+  if (!user || (user.role !== "PROVIDER" && user.role !== "REVIEWER")) return null;
   const profile = await prisma.providerProfile.findFirst({
-    where: { memberId: user.id },
+    where: { memberId: user.id, status: { in: ["active", "platform"] } },
     orderBy: { createdAt: "asc" },
   });
   return profile?.id ?? null;

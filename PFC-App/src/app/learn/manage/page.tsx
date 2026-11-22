@@ -45,7 +45,7 @@ export default async function ManagePage() {
     return (
       <>
         <AppHeader back backFallback="/learn/me" title="Quản lý nội dung" />
-        <EmptyState icon={ShieldAlert} title="Không có quyền" description="Chủ nhiệm, Ban điều hành và Trưởng ban Chuyên môn quản lý nội dung học tập." />
+        <EmptyState icon={ShieldAlert} title="Không có quyền" description="Tài khoản đang bị khóa." />
       </>
     );
   }
@@ -54,6 +54,7 @@ export default async function ManagePage() {
       <AppHeader back backFallback="/learn/me" title="Quản lý nội dung" />
       {o.canCreate && (
         <Section>
+          <p className="mb-2 text-[13px] text-ink-2">Mọi thành viên đều có thể đóng góp khóa học, bài kiểm tra và tài liệu. Nội dung được Ban Chuyên môn duyệt trước khi hiện công khai.</p>
           <div className="grid grid-cols-3 gap-2">
             <ButtonLink href="/learn/manage/courses/new" variant="secondary">
               <Plus size={16} /> Khóa học

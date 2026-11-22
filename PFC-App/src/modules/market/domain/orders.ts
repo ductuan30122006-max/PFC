@@ -137,5 +137,5 @@ export const CATEGORIES = {
 } as const;
 export type Category = keyof typeof CATEGORIES;
 
-export const KIND_LABEL = { product: "Sản phẩm", digital: "Sản phẩm số", service: "Dịch vụ", course: "Khóa học" } as const;
+export const KIND_LABEL = { product: "Sản phẩm", digital: "Sản phẩm số", service: "Dịch vụ", course: "Khóa học", ticket: "Vé sự kiện" } as const;
 export const DELIVERY_LABEL = { ship: "Giao hàng", pickup: "Nhận tại chỗ", online: "Trực tuyến" } as const;

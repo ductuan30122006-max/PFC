@@ -54,3 +54,11 @@ export function assertHttpsUrl(url: string): void {
     throw new Error("External apply URL must be https");
   }
 }
+
+/**
+ * Where "Gửi xác minh" leads (DEC-09): Trusted Partners publish straight to Verified and are post-reviewed
+ * (reviewers can still take a post down: Verified → Rejected); everyone else waits in the review queue.
+ */
+export function statusOnSubmit(tier: "UNVERIFIED" | "VERIFIED_PROVIDER" | "TRUSTED_PARTNER"): "PENDING" | "VERIFIED" {
+  return tier === "TRUSTED_PARTNER" ? "VERIFIED" : "PENDING";
+}

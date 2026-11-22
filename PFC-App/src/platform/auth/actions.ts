@@ -12,6 +12,7 @@ import { notify } from "@/platform/notifications/service";
 import { CHALLENGE_COOKIE, CHALLENGE_TTL, openChallenge, sealChallenge } from "./challenge";
 import { safeNext } from "./oauth";
 import { passwordSchema } from "./password-policy";
+import { recordReferral } from "@/modules/rewards/server/service";
 import * as auth from "./service";
 import { ActionError, endSession, requireMemberForAction, startSession } from "./session";
 
@@ -70,6 +71,8 @@ export async function verifyTwoFactorAction(code: string): Promise<ActionResult>
 export async function registerAction(input: unknown, next?: string): Promise<ActionResult<{ mustVerify: boolean }>> {
   const res = await safeAction(async () => {
     const r = await auth.registerMember(input, await clientIp());
+    const ref = (await cookies()).get("pfc_ref")?.value;
+    if (ref) await recordReferral(r.id, ref);
     if (!r.mustVerify) await startSession(r.id, { remember: true });
     return { mustVerify: r.mustVerify };
   });

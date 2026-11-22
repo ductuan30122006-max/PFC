@@ -7,8 +7,10 @@ import type { Priority } from "@/modules/club/types";
 import { AppHeader, Button, EmptyState, SegmentedTabs } from "@/ui";
 import { FormError, SelectInput, TextArea, TextInput } from "@/ui/Form";
 import { ShieldAlert } from "lucide-react";
+import { clubPost } from "@/modules/club/session";
+import { AttachButton, AttachmentList, type UploadedFile } from "@/modules/club/ui/FileAttach";
 
-/** FR-CLB-004 Create task: assignee, priority, deadline, team. */
+/** FR-CLB-004 Create task: assignee, priority, deadline, team, attached documents. */
 export default function NewClubTaskPage() {
   const router = useRouter();
   const { home, can, act } = useClub();
@@ -18,6 +20,7 @@ export default function NewClubTaskPage() {
   const [deadline, setDeadline] = useState("");
   const [assigneeId, setAssigneeId] = useState("");
   const [teamId, setTeamId] = useState(home.myMembership?.teamId ?? "");
+  const [files, setFiles] = useState<UploadedFile[]>([]);
   const [state, setState] = useState<{ pending?: boolean; error?: string }>({});
 
   if (!(home.taskScope?.canManageTasks ?? can("manage_tasks"))) {
@@ -43,6 +46,7 @@ export default function NewClubTaskPage() {
         assigneeId: assigneeId || undefined,
         teamId: teamId || undefined,
       });
+      if (r.taskId) for (const f of files) await clubPost("add_task_attachment", { taskId: r.taskId, ...f });
       router.replace(r.taskId ? `/club/tasks/${r.taskId}` : "/club/tasks");
     } catch (err) {
       setState({ error: err instanceof Error ? err.message : "Tạo công việc thất bại." });
@@ -87,6 +91,11 @@ export default function NewClubTaskPage() {
             </option>
           ))}
         </SelectInput>
+        <div className="space-y-2">
+          <p className="text-[13px] font-semibold text-ink-2">Tài liệu đính kèm</p>
+          <AttachmentList items={files} onRemove={(i) => setFiles(files.filter((_, j) => j !== i))} />
+          <AttachButton disabled={files.length >= 10} onUploaded={(f) => setFiles((x) => [...x, f])} />
+        </div>
         <FormError message={state.error} />
         <Button type="submit" block disabled={state.pending}>
           {state.pending ? "Đang tạo…" : "Tạo công việc"}

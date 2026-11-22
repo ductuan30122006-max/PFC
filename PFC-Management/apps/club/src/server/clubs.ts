@@ -856,12 +856,14 @@ export function requestJoin(
   if (existing && ["pending", "active"].includes(existing.status)) {
     throw new AppError("ALREADY_MEMBER", "Already joined or pending", 409);
   }
-  const id = existing?.status === "left" ? existing.id : nanoid();
+  // A member who left or was rejected re-applies on the same membership row (history keeps the trail).
+  const reuse = existing?.status === "left" || existing?.status === "rejected";
+  const id = reuse ? existing!.id : nanoid();
   const auto = club.visibility === "open" || !!invite;
   const status = auto ? "active" : "pending";
   const now = new Date();
   sqlite.transaction(() => {
-    if (existing?.status === "left") {
+    if (reuse) {
       db.update(memberships)
         .set({
           status,
@@ -873,7 +875,7 @@ export function requestJoin(
           effectiveTo: null,
           updatedAt: now,
         })
-        .where(eq(memberships.id, existing.id))
+        .where(eq(memberships.id, existing!.id))
         .run();
     } else {
       db.insert(memberships)

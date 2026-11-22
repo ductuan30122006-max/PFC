@@ -1,4 +1,6 @@
 import "server-only";
+import { awardPoints } from "@/modules/rewards/server/service";
+import { assertAllowed } from "@/platform/admin/restrictions";
 import { notify } from "@/platform/notifications/service";
 import { PAYMENT_TTL_MIN, autoRefund, createPayment, onlinePaymentEnabled } from "@/modules/payments/server/service";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -10,6 +12,8 @@ import { can, type Actor } from "@/platform/roles";
 import { applyWorkflow, canEditContent, canViewContent, isContentStatus, type ContentStatus, type WorkflowAction } from "@/platform/workflow";
 import { MAX_AMOUNT_VND } from "@/lib/money";
 import { verifyOwnUploadUrls } from "@/platform/uploads/service";
+import { getSettings } from "@/platform/settings/service";
+import { LISTING_TYPES, deliveryFor, isListingType, listingRiskCheck, normalizeTags, type ListingType, type SellerLevel } from "../domain/listings";
 import {
   CATEGORIES,
   applyOrderAction,
@@ -34,14 +38,17 @@ const likeArg = (q: string) => `%${q.trim().replace(/[\\%_]/g, (m) => `\\${m}`)}
 // ───────────────────────── Sellers ─────────────────────────
 
 export type SellerStatus = "pending" | "approved" | "rejected" | "suspended";
-export type Seller = { memberId: string; shopName: string; bio: string; contact: string; status: SellerStatus; rejectReason: string | null; memberName: string };
+export type VerifyStatus = "none" | "pending" | "rejected";
+export type Seller = { memberId: string; shopName: string; bio: string; contact: string; status: SellerStatus; rejectReason: string | null; memberName: string; level: SellerLevel; verifyStatus: VerifyStatus; verifyNote: string; legalName: string; phone: string };
 
 export async function getSeller(memberId: string): Promise<Seller | null> {
-  const r = await one<{ member_id: string; shop_name: string; bio: string; contact: string; status: SellerStatus; reject_reason: string | null; full_name: string }>(
+  const r = await one<{ member_id: string; shop_name: string; bio: string; contact: string; status: SellerStatus; reject_reason: string | null; full_name: string; level: SellerLevel; verify_status: VerifyStatus; verify_note: string; legal_name: string; phone: string }>(
     "SELECT s.*, m.full_name FROM mkt_sellers s JOIN members m ON m.id = s.member_id WHERE s.member_id = ?",
     [memberId],
   );
-  return r ? { memberId: r.member_id, shopName: r.shop_name, bio: r.bio, contact: r.contact, status: r.status, rejectReason: r.reject_reason, memberName: r.full_name } : null;
+  return r
+    ? { memberId: r.member_id, shopName: r.shop_name, bio: r.bio, contact: r.contact, status: r.status, rejectReason: r.reject_reason, memberName: r.full_name, level: r.level === "verified" ? "verified" : "basic", verifyStatus: r.verify_status, verifyNote: r.verify_note, legalName: r.legal_name, phone: r.phone }
+    : null;
 }
 
 const sellerSchema = z.object({
@@ -58,13 +65,59 @@ export async function registerSeller(actor: Actor, input: unknown): Promise<Sell
     await run("UPDATE mkt_sellers SET shop_name = ?, bio = ?, contact = ?, updated_at = ? WHERE member_id = ?", [d.shopName, d.bio, d.contact, now(), actor.id]);
     return existing.status;
   }
-  const status: SellerStatus = can(actor, "mkt.seller.approve") ? "approved" : "pending";
+  // Risk-based: a verified email opens a basic shop at once (low-risk items under the caps); staff open verified shops.
+  if (existing?.status === "rejected") throw new ActionError("Hồ sơ người bán đã bị từ chối. Liên hệ hỗ trợ nếu cần xem xét lại.");
+  const verified = await one("SELECT 1 AS x FROM members WHERE id = ? AND email_verified_at IS NOT NULL", [actor.id]);
+  if (!verified && !can(actor, "mkt.seller.approve")) throw new ActionError("Xác thực email tài khoản trước khi mở cửa hàng (Thêm → Cài đặt tài khoản).");
+  const level: SellerLevel = can(actor, "mkt.seller.approve") ? "verified" : "basic";
   await run(
-    `INSERT INTO mkt_sellers (member_id, shop_name, bio, contact, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT (member_id) DO UPDATE SET shop_name = excluded.shop_name, bio = excluded.bio, contact = excluded.contact, status = excluded.status, reject_reason = NULL, updated_at = excluded.updated_at`,
-    [actor.id, d.shopName, d.bio, d.contact, status, now(), now()],
+    `INSERT INTO mkt_sellers (member_id, shop_name, bio, contact, status, level, created_at, updated_at) VALUES (?, ?, ?, ?, 'approved', ?, ?, ?)
+     ON CONFLICT (member_id) DO UPDATE SET shop_name = excluded.shop_name, bio = excluded.bio, contact = excluded.contact, status = 'approved', reject_reason = NULL, updated_at = excluded.updated_at`,
+    [actor.id, d.shopName, d.bio, d.contact, level, now(), now()],
   );
-  return status;
+  return "approved";
+}
+
+/** SELL-03 Ask for the "verified" level: real name + phone, reviewed by staff. */
+export async function requestVerification(actor: Actor, input: unknown): Promise<void> {
+  const d = z
+    .object({
+      legalName: z.string().trim().min(4, "Nhập họ tên thật (trùng giấy tờ).").max(80),
+      phone: z
+        .string()
+        .trim()
+        .transform((v) => v.replace(/[\s.-]/g, ""))
+        .refine((v) => /^(\+84|0)\d{9,10}$/.test(v), "Số điện thoại không hợp lệ."),
+      note: z.string().trim().min(10, "Mô tả bạn định bán gì (tối thiểu 10 ký tự).").max(500),
+    })
+    .parse(input);
+  const s = await getSeller(actor.id);
+  if (!s || s.status !== "approved") throw new ActionError("Mở cửa hàng trước khi xin xác minh.");
+  if (s.level === "verified") throw new ActionError("Cửa hàng đã được xác minh.");
+  if (s.verifyStatus === "pending") throw new ActionError("Yêu cầu xác minh đang chờ duyệt.");
+  await run("UPDATE mkt_sellers SET legal_name = ?, phone = ?, verify_note = ?, verify_status = 'pending', updated_at = ? WHERE member_id = ?", [d.legalName, d.phone, d.note, now(), actor.id]);
+  await audit(actor.id, "mkt.seller.verify_request", `seller:${actor.id}`, "success");
+}
+
+export async function decideVerification(actor: Actor, memberId: string, approve: boolean, reason?: string): Promise<void> {
+  if (!can(actor, "mkt.seller.approve")) throw new ActionError("Bạn không có quyền duyệt người bán.");
+  const s = await getSeller(memberId);
+  if (!s || s.verifyStatus !== "pending") throw new ActionError("Không có yêu cầu xác minh đang chờ.");
+  if (!approve && !reason?.trim()) throw new ActionError("Cần ghi lý do từ chối.");
+  await run("UPDATE mkt_sellers SET level = ?, verify_status = ?, reject_reason = ?, updated_at = ? WHERE member_id = ?", [approve ? "verified" : s.level, approve ? "none" : "rejected", approve ? null : reason!.trim(), now(), memberId]);
+  await audit(actor.id, `mkt.seller.verify_${approve ? "approve" : "reject"}`, `seller:${memberId}`, "success");
+  await notify(memberId, {
+    category: "market",
+    title: approve ? "Cửa hàng của bạn đã được xác minh" : "Yêu cầu xác minh cửa hàng chưa được duyệt",
+    body: approve ? "Bạn có thể đăng dịch vụ, khóa học, vé sự kiện và món giá trị cao." : `Lý do: ${reason!.trim().slice(0, 200)}`,
+    href: "/market/sell",
+  });
+}
+
+export async function verificationQueue(actor: Actor): Promise<Seller[]> {
+  if (!can(actor, "mkt.seller.approve")) throw new ActionError("Bạn không có quyền duyệt người bán.");
+  const rows = await all<{ member_id: string }>("SELECT member_id FROM mkt_sellers WHERE verify_status = 'pending' ORDER BY updated_at");
+  return (await Promise.all(rows.map((r) => getSeller(r.member_id)))).filter((x): x is Seller => !!x);
 }
 
 export async function listSellersByStatus(actor: Actor, status: SellerStatus): Promise<Seller[]> {
@@ -99,7 +152,7 @@ export type Listing = {
   id: string;
   sellerId: string;
   shopName: string;
-  kind: "product" | "digital" | "service" | "course";
+  kind: ListingType;
   category: keyof typeof CATEGORIES;
   title: string;
   description: string;
@@ -113,6 +166,13 @@ export type Listing = {
   sold: number;
   /** Server-processed photo URLs; the first is the cover. */
   images: string[];
+  currency: "VND";
+  tags: string[];
+  courseId: string | null;
+  courseTitle: string | null;
+  eventId: string | null;
+  eventTitle: string | null;
+  sellerLevel: SellerLevel;
 };
 
 export const MAX_LISTING_IMAGES = 6;
@@ -126,7 +186,9 @@ function parseImages(raw: unknown): string[] {
   }
 }
 
-const LISTING_SQL = `SELECT l.*, COALESCE(s.shop_name, m.full_name) AS shop_name,
+const LISTING_SQL = `SELECT l.*, COALESCE(s.shop_name, m.full_name) AS shop_name, COALESCE(s.level, 'basic') AS seller_level,
+  (SELECT title FROM edu_courses c WHERE c.id = l.course_id) AS course_title,
+  (SELECT title FROM evt_events e WHERE e.id = l.event_id) AS event_title,
   (SELECT AVG(rating) FROM mkt_reviews r WHERE r.listing_id = l.id) AS rating,
   (SELECT COUNT(*) FROM mkt_reviews r WHERE r.listing_id = l.id) AS review_count,
   (SELECT COALESCE(SUM(oi.qty),0) FROM mkt_order_items oi JOIN mkt_orders o ON o.id = oi.order_id WHERE oi.listing_id = l.id AND o.status = 'completed') AS sold
@@ -149,6 +211,12 @@ type ListingRow = {
   review_count: number;
   sold: number;
   images: string;
+  tags: string;
+  course_id: string | null;
+  course_title: string | null;
+  event_id: string | null;
+  event_title: string | null;
+  seller_level: string;
 };
 const toListing = (r: ListingRow): Listing => ({
   id: r.id,
@@ -167,15 +235,23 @@ const toListing = (r: ListingRow): Listing => ({
   reviewCount: Number(r.review_count),
   sold: Number(r.sold),
   images: parseImages(r.images),
+  currency: "VND",
+  tags: r.tags ? r.tags.split(",").filter(Boolean) : [],
+  courseId: r.course_id,
+  courseTitle: r.course_title,
+  eventId: r.event_id,
+  eventTitle: r.event_title,
+  sellerLevel: r.seller_level === "verified" ? "verified" : "basic",
 });
 
-export async function listPublished(f: { q?: string; category?: string; kind?: string; sellerId?: string; sort?: string } = {}): Promise<Listing[]> {
+export async function listPublished(f: { q?: string; category?: string; kind?: string; sellerId?: string; sort?: string; tag?: string } = {}): Promise<Listing[]> {
   const where = ["l.status = 'published'"];
   const args: string[] = [];
   if (f.category && f.category in CATEGORIES) (where.push("l.category = ?"), args.push(f.category));
-  if (f.kind && ["product", "digital", "service", "course"].includes(f.kind)) (where.push("l.kind = ?"), args.push(f.kind));
+  if (isListingType(f.kind)) (where.push("l.kind = ?"), args.push(f.kind));
+  if (f.tag?.trim()) (where.push("(',' || l.tags || ',') LIKE ? ESCAPE '\\'"), args.push(`%,${f.tag.trim().toLocaleLowerCase("vi").replace(/[\\%_]/g, (m) => `\\${m}`)},%`));
   if (f.sellerId) (where.push("l.seller_id = ?"), args.push(f.sellerId));
-  if (f.q?.trim()) (where.push("(l.title LIKE ? ESCAPE '\\' OR l.description LIKE ? ESCAPE '\\')"), args.push(likeArg(f.q), likeArg(f.q)));
+  if (f.q?.trim()) (where.push("(l.title LIKE ? ESCAPE '\\' OR l.description LIKE ? ESCAPE '\\' OR l.tags LIKE ? ESCAPE '\\')"), args.push(likeArg(f.q), likeArg(f.q), likeArg(f.q)));
   const order = f.sort === "price_asc" ? "l.price ASC" : f.sort === "price_desc" ? "l.price DESC" : "l.updated_at DESC";
   return (await all<ListingRow>(`${LISTING_SQL} WHERE ${where.join(" AND ")} ORDER BY ${order} LIMIT 200`, args)).map(toListing);
 }
@@ -202,7 +278,7 @@ export async function getListing(actor: Actor | null, id: string) {
 
 const listingSchema = z
   .object({
-    kind: z.enum(["product", "digital", "service", "course"]),
+    kind: z.enum(Object.keys(LISTING_TYPES) as [ListingType, ...ListingType[]]),
     category: z.string().refine((c) => c in CATEGORIES, "Chọn danh mục."),
     title: z.string().trim().min(3, "Tiêu đề tối thiểu 3 ký tự.").max(120),
     description: z.string().trim().min(10, "Mô tả tối thiểu 10 ký tự.").max(5000),
@@ -210,9 +286,14 @@ const listingSchema = z
     stock: z.union([z.coerce.number().int().min(0).max(100000), z.null()]).default(null),
     delivery: z.enum(["ship", "pickup", "online"]),
     images: z.array(z.string()).max(MAX_LISTING_IMAGES, `Tối đa ${MAX_LISTING_IMAGES} ảnh.`).default([]),
+    currency: z.literal("VND").default("VND"),
+    tags: z.array(z.string().max(40)).max(20).default([]),
+    courseId: z.string().nullable().optional(),
+    eventId: z.string().nullable().optional(),
   })
   .superRefine((v, ctx) => {
-    if ((v.kind === "digital" || v.kind === "course") && v.delivery !== "online") ctx.addIssue({ code: "custom", message: "Sản phẩm số / khóa học phải giao trực tuyến." });
+    if (v.kind === "course" && !v.courseId) ctx.addIssue({ code: "custom", message: "Chọn khóa học trong Học tập để liên kết." });
+    if (v.kind === "ticket" && !v.eventId) ctx.addIssue({ code: "custom", message: "Chọn sự kiện bạn tổ chức để bán vé." });
   });
 
 async function requireApprovedSeller(actor: Actor) {
@@ -220,14 +301,65 @@ async function requireApprovedSeller(actor: Actor) {
   if (!s || s.status !== "approved") throw new ActionError(s?.status === "pending" ? "Hồ sơ người bán đang chờ duyệt." : "Bạn cần đăng ký và được duyệt làm người bán trước.");
 }
 
+type ListingInput = z.infer<typeof listingSchema>;
+
+/**
+ * Applies the listing-type rules: risk-based seller level, links to the seller's own course / event,
+ * ticket price taken from the event, normalized tags and delivery.
+ */
+async function prepareListing(actor: Actor, d: ListingInput, isNew: boolean) {
+  const seller = await getSeller(actor.id);
+  const active = Number((await one<{ n: number }>("SELECT COUNT(*) AS n FROM mkt_listings WHERE seller_id = ? AND status IN ('draft','submitted','published')", [actor.id]))?.n ?? 0);
+  let price = d.price;
+  let courseId: string | null = null;
+  let eventId: string | null = null;
+  let stock = d.stock;
+  if (d.kind === "course") {
+    const c = await one<{ author_id: string; status: string }>("SELECT author_id, status FROM edu_courses WHERE id = ?", [d.courseId!]);
+    if (!c || c.author_id !== actor.id) throw new ActionError("Chỉ liên kết được khóa học do bạn tạo trong Học tập.");
+    if (c.status !== "published") throw new ActionError("Khóa học cần được duyệt và xuất bản trước khi bán.");
+    courseId = d.courseId!;
+  }
+  if (d.kind === "ticket") {
+    const e = await one<{ organizer_id: string; status: string; min_price: number | null }>(
+      "SELECT e.organizer_id, e.status, (SELECT MIN(price) FROM evt_ticket_types t WHERE t.event_id = e.id) AS min_price FROM evt_events e WHERE e.id = ?",
+      [d.eventId!],
+    );
+    if (!e || e.organizer_id !== actor.id) throw new ActionError("Chỉ bán vé được cho sự kiện do bạn tổ chức.");
+    if (e.status !== "published") throw new ActionError("Sự kiện cần được duyệt và mở đăng ký trước.");
+    eventId = d.eventId!;
+    price = Number(e.min_price ?? 0); // tickets are bought through the event page; price shown "từ …"
+    stock = null;
+  }
+  const err = listingRiskCheck(seller?.level ?? "basic", { kind: d.kind, price }, active, (await getSettings()).market, isNew);
+  if (err) throw new ActionError(err, "seller_verification");
+  return { ...d, price, stock, courseId, eventId, tags: normalizeTags(d.tags), delivery: deliveryFor(d.kind, d.delivery) };
+}
+
+/** Courses / events a seller may link (their own, published). */
+export async function linkableItems(actor: Actor): Promise<{ courses: { id: string; title: string }[]; events: { id: string; title: string; startsAt: string }[] }> {
+  const courses = await all<{ id: string; title: string }>("SELECT id, title FROM edu_courses WHERE author_id = ? AND status = 'published' ORDER BY updated_at DESC", [actor.id]);
+  const events = await all<{ id: string; title: string; starts_at: string }>("SELECT id, title, starts_at FROM evt_events WHERE organizer_id = ? AND status = 'published' ORDER BY starts_at", [actor.id]);
+  return { courses, events: events.map((e) => ({ id: e.id, title: e.title, startsAt: e.starts_at })) };
+}
+
+/** Popular tags among published listings (filter chips). */
+export async function popularTags(limit = 12): Promise<string[]> {
+  const rows = await all<{ tags: string }>("SELECT tags FROM mkt_listings WHERE status = 'published' AND tags != ''");
+  const count = new Map<string, number>();
+  for (const r of rows) for (const t of r.tags.split(",")) if (t) count.set(t, (count.get(t) ?? 0) + 1);
+  return [...count.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit).map(([t]) => t);
+}
+
 export async function createListing(actor: Actor, input: unknown): Promise<string> {
+  await assertAllowed(actor.id, "market_sell");
   await requireApprovedSeller(actor);
-  const d = listingSchema.parse(input);
+  const d = await prepareListing(actor, listingSchema.parse(input), true);
   const images = await verifyOwnUploadUrls(actor, "listing", d.images, MAX_LISTING_IMAGES);
   const id = randomUUID();
   await run(
-    "INSERT INTO mkt_listings (id, seller_id, kind, category, title, description, price, stock, delivery, images, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    [id, actor.id, d.kind, d.category, d.title, d.description, d.price, d.stock, d.delivery, JSON.stringify(images), now(), now()],
+    "INSERT INTO mkt_listings (id, seller_id, kind, category, title, description, price, currency, stock, delivery, images, tags, course_id, event_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'VND', ?, ?, ?, ?, ?, ?, ?, ?)",
+    [id, actor.id, d.kind, d.category, d.title, d.description, d.price, d.stock, d.delivery, JSON.stringify(images), d.tags.join(","), d.courseId, d.eventId, now(), now()],
   );
   return id;
 }
@@ -241,10 +373,10 @@ export async function updateListing(actor: Actor, id: string, input: unknown): P
   if (!isOwner) throw new ActionError("Bạn chỉ sửa được tin đăng của mình.");
   if (status === "submitted") throw new ActionError("Tin đang chờ duyệt, chưa sửa được.");
   await requireApprovedSeller(actor);
-  const d = listingSchema.parse(input);
+  const d = await prepareListing(actor, listingSchema.parse(input), false);
   const images = await verifyOwnUploadUrls(actor, "listing", d.images, MAX_LISTING_IMAGES);
   const next: ContentStatus = status === "rejected" ? "draft" : status === "published" ? (can(actor, "mkt.listing.approve") ? "published" : "submitted") : status;
-  await run("UPDATE mkt_listings SET kind = ?, category = ?, title = ?, description = ?, price = ?, stock = ?, delivery = ?, images = ?, status = ?, updated_at = ? WHERE id = ?", [
+  await run("UPDATE mkt_listings SET kind = ?, category = ?, title = ?, description = ?, price = ?, stock = ?, delivery = ?, images = ?, tags = ?, course_id = ?, event_id = ?, status = ?, updated_at = ? WHERE id = ?", [
     d.kind,
     d.category,
     d.title,
@@ -253,6 +385,9 @@ export async function updateListing(actor: Actor, id: string, input: unknown): P
     d.stock,
     d.delivery,
     JSON.stringify(images),
+    d.tags.join(","),
+    d.courseId,
+    d.eventId,
     next,
     now(),
     id,
@@ -263,7 +398,13 @@ export async function updateListing(actor: Actor, id: string, input: unknown): P
 export async function listingTransition(actor: Actor, id: string, action: WorkflowAction, reason?: string): Promise<ContentStatus> {
   const r = await one<{ seller_id: string; status: string }>("SELECT seller_id, status FROM mkt_listings WHERE id = ?", [id]);
   if (!r) throw new ActionError("Không tìm thấy tin đăng.");
-  if (action === "submit") await requireApprovedSeller(actor);
+  if (action === "submit") {
+    await requireApprovedSeller(actor);
+    const l = await one<{ kind: ListingType; price: number }>("SELECT kind, price FROM mkt_listings WHERE id = ?", [id]);
+    const seller = await getSeller(actor.id);
+    const err = l && listingRiskCheck(seller?.level ?? "basic", { kind: l.kind, price: Number(l.price) }, 0, (await getSettings()).market, false);
+    if (err) throw new ActionError(err, "seller_verification");
+  }
   const res = applyWorkflow(action, statusOf(r.status), { isAuthor: r.seller_id === actor.id, canApprove: can(actor, "mkt.listing.approve") }, reason);
   if (!res.ok) throw new ActionError(res.error);
   await run("UPDATE mkt_listings SET status = ?, reject_reason = ?, updated_at = ? WHERE id = ?", [res.to, res.to === "rejected" ? reason!.trim().slice(0, 500) : null, now(), id]);
@@ -313,8 +454,9 @@ const qtySchema = z.coerce.number().int().min(1, "Số lượng tối thiểu 1.
 
 export async function addToCart(actor: Actor, listingId: string, qty: unknown = 1): Promise<void> {
   const n = qtySchema.parse(qty);
-  const l = await one<{ seller_id: string; status: string; stock: number | null }>("SELECT seller_id, status, stock FROM mkt_listings WHERE id = ?", [listingId]);
+  const l = await one<{ seller_id: string; status: string; stock: number | null; kind: string }>("SELECT seller_id, status, stock, kind FROM mkt_listings WHERE id = ?", [listingId]);
   if (!l || l.status !== "published") throw new ActionError("Sản phẩm không còn bán.");
+  if (l.kind === "ticket") throw new ActionError("Vé sự kiện được mua tại trang sự kiện.");
   if (l.seller_id === actor.id) throw new ActionError("Bạn không thể mua sản phẩm của chính mình.");
   const cur = await one<{ qty: number }>("SELECT qty FROM mkt_cart_items WHERE member_id = ? AND listing_id = ?", [actor.id, listingId]);
   const total = Number(cur?.qty ?? 0) + n;
@@ -581,6 +723,7 @@ export async function reviewItem(actor: Actor, orderId: string, listingId: strin
     d.comment,
     now(),
   ]);
+  await awardPoints(actor.id, "order_review", `${orderId}:${listingId}`);
 }
 
 /** SELL-01 dashboard figures (SELL-12 revenue = completed orders). */

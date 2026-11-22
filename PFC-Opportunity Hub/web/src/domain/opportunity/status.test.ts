@@ -4,6 +4,7 @@ import {
   canTransition,
   isPubliclyVisible,
   assertHttpsUrl,
+  statusOnSubmit,
 } from "./status";
 
 test("opportunity FSM allows Draft→Pending→Verified", () => {
@@ -24,4 +25,12 @@ test("public visibility only Verified and not expired", () => {
 test("external URL must be https", () => {
   assert.doesNotThrow(() => assertHttpsUrl("https://example.com/apply"));
   assert.throws(() => assertHttpsUrl("http://example.com/apply"));
+});
+
+test("trusted partners publish on submit; others wait for review", () => {
+  assert.equal(statusOnSubmit("TRUSTED_PARTNER"), "VERIFIED");
+  assert.equal(statusOnSubmit("VERIFIED_PROVIDER"), "PENDING");
+  assert.equal(statusOnSubmit("UNVERIFIED"), "PENDING");
+  // post-review takedown stays possible
+  assert.equal(canTransition("VERIFIED", "REJECTED"), true);
 });

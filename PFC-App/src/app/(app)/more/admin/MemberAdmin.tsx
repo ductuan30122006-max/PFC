@@ -6,7 +6,7 @@ import type { AdminMemberRow } from "@/platform/admin/service";
 import { setLockedAction, setRoleAction } from "@/platform/admin/actions";
 import { DEPARTMENTS, DEPARTMENT_LABEL, ROLES, ROLE_LABEL, type Department, type Role } from "@/platform/roles";
 import { SearchBox } from "@/ui/SearchBox";
-import { Badge, BottomSheet, Button } from "@/ui";
+import { Badge, BottomSheet, Button, ButtonLink } from "@/ui";
 import { FormError, SelectInput } from "@/ui/Form";
 import { useAction } from "@/ui/use-action";
 
@@ -18,7 +18,6 @@ export function MemberAdmin({ members, meId, canEdit, canLock }: { members: Admi
   const lock = useAction();
 
   function open(m: AdminMemberRow) {
-    if (!canEdit && !canLock) return;
     setEditing(m);
     setRole(m.role);
     setDept(m.department ?? "chuyen_mon");
@@ -33,7 +32,7 @@ export function MemberAdmin({ members, meId, canEdit, canLock }: { members: Admi
       <ul className="divide-y divide-line overflow-hidden rounded-[var(--radius-card)] border border-line bg-surface">
         {members.map((m) => (
           <li key={m.id}>
-            <button type="button" onClick={() => open(m)} className="flex w-full items-center gap-3 px-4 py-3 text-left active:bg-surface-2" disabled={!canEdit && !canLock}>
+            <button type="button" onClick={() => open(m)} className="flex w-full items-center gap-3 px-4 py-3 text-left active:bg-surface-2">
               <span className="min-w-0 flex-1">
                 <span className="flex items-center gap-1.5 text-[15px] font-semibold text-ink">
                   <span className="truncate">{m.fullName}</span>
@@ -55,6 +54,9 @@ export function MemberAdmin({ members, meId, canEdit, canLock }: { members: Admi
         {editing && (
           <div className="space-y-4">
             <p className="text-[13px] text-muted">{editing.email}</p>
+            <ButtonLink href={`/admin/members/${editing.id}`} variant="secondary" block>
+              Chi tiết, hạn chế, điểm thưởng
+            </ButtonLink>
             {canEdit && (
               <>
                 <SelectInput label="Vai trò" value={role} onChange={(e) => setRole(e.target.value as Role)}>

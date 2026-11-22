@@ -29,7 +29,7 @@ export const DEPARTMENT_LABEL: Record<Department, string> = {
 
 export const PERMISSIONS = {
   // Education Hub
-  "edu.content.create": "Tạo khóa học, bài học, tài liệu, bài kiểm tra",
+  "edu.content.create": "Tạo nội dung học tập không giới hạn số lượng (mọi thành viên đều đóng góp được, tối đa 10 mục/ngày)",
   "edu.content.approve": "Duyệt / xuất bản / gỡ nội dung học tập của người khác",
   "edu.content.delete_any": "Xóa nội dung học tập của người khác",
   "edu.forum.moderate": "Ẩn / khóa bài viết diễn đàn của người khác",
@@ -51,13 +51,22 @@ export const PERMISSIONS = {
   "admin.members.view": "Xem danh sách tài khoản",
   "admin.roles.manage": "Phân vai trò cho tài khoản khác",
   "admin.members.lock": "Khóa / mở khóa tài khoản",
+  "admin.members.restrict": "Hạn chế tạm thời: đăng bài, nhắn tin, bán hàng, tổ chức sự kiện",
+  "admin.dashboard": "Xem bảng điều khiển quản trị, hàng chờ kiểm duyệt chung",
+  "admin.audit.view": "Xem nhật ký hệ thống và sự kiện bảo mật",
+  "admin.settings.manage": "Bật / tắt tính năng, cấu hình điểm thưởng và hạng thành viên",
+  "admin.broadcast": "Gửi thông báo chung tới thành viên",
+  "admin.support": "Trả lời yêu cầu hỗ trợ",
+  "rewards.manage": "Quản lý quà tặng, duyệt đổi quà, điều chỉnh điểm",
+  // Finance community content (Ngon – Bổ – Rẻ)
+  "places.moderate": "Ẩn địa điểm / đánh giá vi phạm",
 } as const;
 export type Permission = keyof typeof PERMISSIONS;
 
 /** Department-scoped grants for Trưởng ban. */
 const DEPARTMENT_GRANTS: Record<Department, Permission[]> = {
   chuyen_mon: ["edu.content.create", "edu.content.approve", "edu.forum.moderate", "project.approve"],
-  truyen_thong: ["edu.forum.moderate", "mkt.listing.approve", "community.moderate"],
+  truyen_thong: ["edu.forum.moderate", "mkt.listing.approve", "community.moderate", "places.moderate", "admin.broadcast"],
   su_kien: ["edu.forum.moderate", "event.approve"],
 };
 
@@ -75,6 +84,13 @@ const ROLE_GRANTS: Record<Role, Permission[] | "all"> = {
     "event.approve",
     "payments.view",
     "admin.members.view",
+    "admin.members.restrict",
+    "admin.dashboard",
+    "admin.audit.view",
+    "admin.broadcast",
+    "admin.support",
+    "rewards.manage",
+    "places.moderate",
   ],
   truong_ban: [],
   thanh_vien: [],

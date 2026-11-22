@@ -37,3 +37,6 @@ export const checkoutVnpayAction = async (input: unknown) =>
 export const payOrderAction = async (orderId: string) => act(async (a) => (await mkt.startOrderPayment(a, [orderId], await requestIp())).payUrl);
 export const orderActionAction = async (orderId: string, action: OrderAction, reason?: string) => act((a) => mkt.orderAction(a, orderId, action, reason));
 export const reviewItemAction = async (orderId: string, listingId: string, input: unknown) => act((a) => mkt.reviewItem(a, orderId, listingId, input));
+
+export const requestVerificationAction = async (input: unknown) => act((a) => mkt.requestVerification(a, input));
+export const decideVerificationAction = async (memberId: string, approve: boolean, reason?: string) => act((a) => mkt.decideVerification(a, memberId, approve, reason));

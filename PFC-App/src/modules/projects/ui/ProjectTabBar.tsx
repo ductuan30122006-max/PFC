@@ -8,7 +8,7 @@ const TABS: readonly HubTab[] = [
   { href: "/projects/mine", label: "Của tôi", icon: FolderKanban },
   { href: "/projects/new", label: "Tạo dự án", icon: PlusCircle },
   { href: "/projects/mentors", label: "Mentor", icon: GraduationCap },
-  { href: "/projects/more", label: "Thêm", icon: Menu, match: ["/projects/manage"] },
+  { href: "/projects/more", label: "Thêm", icon: Menu, match: ["/projects/manage", "/projects/collab"] },
 ];
 
 export function ProjectTabBar() {

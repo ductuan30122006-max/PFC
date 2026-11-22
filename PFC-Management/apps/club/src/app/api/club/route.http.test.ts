@@ -191,6 +191,8 @@ function seedHttpWorld() {
         clubId: clubX,
         title: "X task",
         assignerId: aliceId,
+        // Plain members only see tasks assigned to them (task scope "assigneeOnly").
+        assigneeId: aliceId,
         status: "todo",
       },
       {

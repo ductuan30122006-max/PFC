@@ -10,7 +10,7 @@ import { useAction } from "@/ui/use-action";
 /** EDU-A05 Quiz/Test Management — create. */
 export default function NewQuizPage() {
   const router = useRouter();
-  const [v, setV] = useState({ title: "", description: "", topic: "finance", passPct: "70" });
+  const [v, setV] = useState({ title: "", description: "", topic: "finance", passPct: "70", timeLimitMin: "" });
   const { run, pending, error } = useAction();
   const set = (k: keyof typeof v) => (e: { target: { value: string } }) => setV((x) => ({ ...x, [k]: e.target.value }));
   return (
@@ -21,7 +21,7 @@ export default function NewQuizPage() {
         noValidate
         onSubmit={(e) => {
           e.preventDefault();
-          run(() => createQuizAction({ ...v, passPct: Number(v.passPct) }), (id) => router.replace(`/learn/manage/quizzes/${id}`));
+          run(() => createQuizAction({ ...v, passPct: Number(v.passPct), timeLimitMin: v.timeLimitMin ? Number(v.timeLimitMin) : null }), (id) => router.replace(`/learn/manage/quizzes/${id}`));
         }}
       >
         <TextInput label="Tên bài kiểm tra" value={v.title} onChange={set("title")} maxLength={120} />
@@ -33,6 +33,7 @@ export default function NewQuizPage() {
           </SelectInput>
           <TextInput label="Điểm đạt (%)" type="number" inputMode="numeric" min={1} max={100} value={v.passPct} onChange={set("passPct")} />
         </div>
+        <TextInput label="Thời gian làm bài (phút)" hint="Bỏ trống = không giới hạn" inputMode="numeric" value={v.timeLimitMin} onChange={(e) => setV((x) => ({ ...x, timeLimitMin: e.target.value.replace(/\D/g, "") }))} />
         <FormError message={error} />
         <Button type="submit" block disabled={pending}>
           {pending ? "Đang tạo…" : "Tạo và thêm câu hỏi"}

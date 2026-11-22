@@ -39,3 +39,10 @@ export const removeLinkAction = async (linkId: string) => act((a) => prj.removeL
 
 export const giveFeedbackAction = async (id: string, input: unknown) => act((a) => prj.giveFeedback(a, id, input));
 export const setFeedbackHiddenAction = async (feedbackId: string, hidden: boolean) => act((a) => prj.setFeedbackHidden(a, feedbackId, hidden));
+
+export const saveCollabProfileAction = async (input: unknown) =>
+  safeAction(async () => {
+    const me = await requireMemberForAction();
+    await (await import("./collab")).saveCollabProfile(toActor(me), input);
+    revalidatePath("/projects/collab", "layout");
+  });

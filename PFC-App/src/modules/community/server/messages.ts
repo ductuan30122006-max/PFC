@@ -1,4 +1,5 @@
 import "server-only";
+import { assertAllowed } from "@/platform/admin/restrictions";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { all, one, run } from "@/platform/db/client";
@@ -31,6 +32,7 @@ async function blockedEitherWay(a: string, b: string): Promise<boolean> {
 
 /** Opens (or reuses) the 1-1 conversation with `otherId`. */
 export async function startConversation(actor: Actor, otherId: string): Promise<string> {
+  await assertAllowed(actor.id, "messages", "messages");
   const existing = await one<{ id: string }>("SELECT id FROM dm_conversations WHERE pair_key = ?", [pairKey(actor.id, otherId)]);
   if (existing) return existing.id;
   const policy = await policyOf(otherId);
@@ -122,6 +124,7 @@ export async function getMessages(actor: Actor, conversationId: string, after?: 
 
 /** 30 messages / minute. The recipient gets one notification per unread burst (not one per message). */
 export async function sendMessage(actor: Actor, conversationId: string, body: unknown): Promise<Message> {
+  await assertAllowed(actor.id, "messages", "messages");
   const text = z.string().trim().min(1, "Nhập tin nhắn.").max(4000, "Tin nhắn tối đa 4000 ký tự.").parse(body);
   await requireParticipant(actor, conversationId);
   const other = await one<{ member_id: string; last_read_at: string | null }>("SELECT member_id, last_read_at FROM dm_participants WHERE conversation_id = ? AND member_id != ?", [conversationId, actor.id]);
