@@ -10,7 +10,7 @@ import { ImageRejected, processImage, sniffImage } from "./image";
 import { putObject } from "./storage";
 
 /** Image purposes. "document" is the one non-image purpose (PDF, see saveDocument). */
-export const UPLOAD_PURPOSES = ["listing", "avatar", "post", "project", "event", "place", "club", "document", "attachment"] as const;
+export const UPLOAD_PURPOSES = ["listing", "avatar", "post", "project", "event", "place", "club", "document", "attachment", "opportunity"] as const;
 export type UploadPurpose = (typeof UPLOAD_PURPOSES)[number];
 export type Upload = { id: string; url: string; width: number; height: number; kind?: "image" | "file"; name?: string };
 

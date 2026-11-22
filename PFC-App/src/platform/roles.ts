@@ -40,6 +40,8 @@ export const PERMISSIONS = {
   "project.approve": "Duyệt / từ chối dự án để công khai",
   "project.archive_any": "Lưu trữ dự án của người khác",
   "project.manage_any": "Can thiệp mọi dự án: mời / loại thành viên, đổi vai trò, ẩn phản hồi",
+  // Opportunity feed
+  "opp.post": "Đăng cơ hội (việc làm, thực tập, học bổng, cuộc thi) hiển thị trong PFC",
   // Community Hub
   "community.moderate": "Ẩn bài viết / bình luận, xử lý báo cáo vi phạm, lưu trữ nhóm cộng đồng",
   // Shared Event Engine
@@ -65,14 +67,15 @@ export type Permission = keyof typeof PERMISSIONS;
 
 /** Department-scoped grants for Trưởng ban. */
 const DEPARTMENT_GRANTS: Record<Department, Permission[]> = {
-  chuyen_mon: ["edu.content.create", "edu.content.approve", "edu.forum.moderate", "project.approve"],
-  truyen_thong: ["edu.forum.moderate", "mkt.listing.approve", "community.moderate", "places.moderate", "admin.broadcast"],
-  su_kien: ["edu.forum.moderate", "event.approve"],
+  chuyen_mon: ["opp.post", "edu.content.create", "edu.content.approve", "edu.forum.moderate", "project.approve"],
+  truyen_thong: ["opp.post", "edu.forum.moderate", "mkt.listing.approve", "community.moderate", "places.moderate", "admin.broadcast"],
+  su_kien: ["opp.post", "edu.forum.moderate", "event.approve"],
 };
 
 const ROLE_GRANTS: Record<Role, Permission[] | "all"> = {
   chu_nhiem: "all",
   ban_dieu_hanh: [
+    "opp.post",
     "edu.content.create",
     "edu.content.approve",
     "edu.forum.moderate",

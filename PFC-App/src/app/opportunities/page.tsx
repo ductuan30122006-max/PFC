@@ -1,6 +1,7 @@
 "use client";
 
 import { Briefcase, Compass, GraduationCap, LayoutGrid, Search, Trophy, X } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { HubError, hubFetch } from "@/platform/hub-proxy/client";
 import { HubErrorState, ListSkeleton } from "@/platform/hub-proxy/HubStates";
@@ -68,6 +69,13 @@ export default function OpportunitiesPage() {
       <AppHeader backHref="/home" title="Opportunity Hub" />
       <div className="space-y-3 px-4">
         <p className="-mt-1 text-[14px] text-muted">Khám phá cơ hội, kiến tạo tương lai</p>
+        <Link href="/opportunities/sources" className="pressable flex items-center gap-3 rounded-2xl border border-line bg-primary-soft px-4 py-3">
+          <span className="min-w-0 flex-1">
+            <span className="block text-[14px] font-bold text-primary">Việc làm, học bổng, cuộc thi từ các nguồn</span>
+            <span className="block text-[12px] text-ink-2">UEB, Remote OK, We Work Remotely và tin do Ban điều hành PFC đăng</span>
+          </span>
+          <Compass size={20} className="shrink-0 text-primary" />
+        </Link>
         <div className="flex items-center gap-2 rounded-full border border-line bg-surface px-4 focus-within:border-primary">
           <Search size={18} className="text-muted" />
           <input

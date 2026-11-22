@@ -4,7 +4,7 @@ import { ImagePlus, Loader2, X } from "lucide-react";
 import { useId, useRef, useState } from "react";
 import { cx } from "./cx";
 
-type Purpose = "listing" | "avatar" | "post" | "project" | "event" | "place" | "club";
+type Purpose = "listing" | "avatar" | "post" | "project" | "event" | "place" | "club" | "opportunity";
 
 /**
  * Photo picker for forms (mobile: opens camera roll / camera). Each file is uploaded right away to

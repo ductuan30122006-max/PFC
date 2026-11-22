@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { expireStale } from "@/modules/payments/server/service";
 import { expireUnpaidOrders } from "@/modules/market/server/service";
 import { runEventJobs } from "@/modules/events/server/service";
+import { refreshFeed } from "@/modules/oppfeed/server/service";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -21,5 +22,7 @@ export async function GET(req: NextRequest) {
   const payments = await expireStale();
   const orders = await expireUnpaidOrders();
   const events = await runEventJobs();
-  return NextResponse.json({ ok: true, payments, orders, ...events }, { headers: { "cache-control": "no-store" } });
+  // Outside opportunity sources (UEB, job boards): a failing source must not fail the other jobs.
+  const opportunities = await refreshFeed().catch(() => null);
+  return NextResponse.json({ ok: true, payments, orders, opportunities, ...events }, { headers: { "cache-control": "no-store" } });
 }

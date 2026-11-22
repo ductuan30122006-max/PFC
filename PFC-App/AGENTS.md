@@ -33,6 +33,8 @@ The single presentation layer for PFC Digital Hub: open it in a phone browser an
 | `src/app/(app)/rewards` + `src/modules/rewards` | Points, tiers, rewards, referrals (G7); `/r/[code]` referral link |
 | `src/app/(app)/admin` + `src/platform/admin/console.ts` | Admin console (G8): dashboard, member detail/restrictions, audit, settings/flags, rewards, broadcast, support |
 | `src/platform/settings` | Feature flags, point rules, tiers (`app_settings`) |
+| `src/app/opportunities/sources` + `src/modules/oppfeed` | Opportunity feed: UEB announcements, Remote OK and We Work Remotely (public feeds, refreshed at most every 6 h and by the daily job), and posts by leaders (`opp.post`). Shows image, organisation, deadline and live status; always links back to the source. Upwork is link-only (its terms and bot protection forbid copying). |
+| `src/platform/uploads` (`attachment`) | Study / listing files: photos (re-encoded) and PDF, Word, Excel, PowerPoint, TXT/CSV checked by their bytes, no macros, 4 MB. Used by Education documents and quizzes (`edu_attachments`) and digital listings. |
 | `src/app/api/jobs/tick` | Daily job (CRON_SECRET): payment/order expiry, event reminders |
 | `src/app/api/hub/[hub]/[[...path]]` | Hub gateway (allow-list, cookie isolation) |
 | `src/modules/finance`, `education`, `market`, `projects`, `community`, `events`, `payments`, `rewards`, `support` | Native hubs: pure `domain/` + actor-based `server/service.ts` (every permission checked there) + `server/actions.ts` + `ui/` |
