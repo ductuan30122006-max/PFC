@@ -3,6 +3,7 @@ import { ClipboardCheck } from "lucide-react";
 import { currentMember, toActor } from "@/platform/auth/session";
 import { TOPIC_LABEL } from "@/modules/education/domain/learning";
 import { listPublishedQuizzes, myLearning } from "@/modules/education/server/service";
+import { ShareBar } from "@/modules/education/ui/ShareBar";
 import { AppHeader, Badge, EmptyState } from "@/ui";
 import { FilterChips } from "@/ui/FilterChips";
 
@@ -18,7 +19,8 @@ export default async function QuizzesPage({ searchParams }: { searchParams: Prom
   return (
     <>
       <AppHeader title="Bài kiểm tra" backHref="/learn" />
-      <div className="px-4">
+      <div className="space-y-3 px-4">
+        <ShareBar />
         <FilterChips
           label="Chủ đề"
           value={topic === "finance" || topic === "development" ? topic : "all"}

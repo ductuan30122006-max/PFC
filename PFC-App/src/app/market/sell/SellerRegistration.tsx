@@ -27,6 +27,11 @@ export function SellerRegistration({ initial, submitLabel = "Mở cửa hàng" }
         <TextArea label="Giới thiệu" value={v.bio} onChange={(e) => setV({ ...v, bio: e.target.value })} maxLength={500} />
         <TextInput label="Liên hệ (Zalo / điện thoại / email)" value={v.contact} onChange={(e) => setV({ ...v, contact: e.target.value })} maxLength={120} hint="Chỉ người mua đã đặt hàng mới thấy thông tin này." />
         <FormError message={error} />
+        {error?.includes("Xác thực email") && (
+          <a href="/verify-email" className="block text-[14px] font-semibold text-primary underline">
+            Xác thực email ngay
+          </a>
+        )}
         {saved && <p className="text-[14px] font-semibold text-income">Đã lưu.</p>}
         <Button type="submit" block disabled={pending}>
           {pending ? "Đang gửi…" : submitLabel}

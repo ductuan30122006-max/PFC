@@ -2,6 +2,7 @@ import { FileText, Paperclip } from "lucide-react";
 import Link from "next/link";
 import { RESOURCE_KIND_LABEL, TOPIC_LABEL } from "@/modules/education/domain/learning";
 import { listPublishedResources, listSubjects } from "@/modules/education/server/service";
+import { ShareBar } from "@/modules/education/ui/ShareBar";
 import { AppHeader, Badge, EmptyState } from "@/ui";
 import { FilterChips } from "@/ui/FilterChips";
 
@@ -23,7 +24,8 @@ export default async function ResourcesPage({ searchParams }: { searchParams: Pr
   return (
     <>
       <AppHeader back backFallback="/learn" title="Thư viện tài liệu" />
-      <div className="space-y-1 px-4">
+      <div className="space-y-2 px-4">
+        <ShareBar />
         <FilterChips
           label="Loại tài liệu"
           value={curKind}

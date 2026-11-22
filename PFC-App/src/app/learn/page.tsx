@@ -3,6 +3,7 @@ import { BookOpen, ClipboardCheck, FileText, GraduationCap, MessagesSquare } fro
 import { currentMember, toActor } from "@/platform/auth/session";
 import { eduHomeStats, listPublishedCourses, listPublishedQuizzes, myLearning } from "@/modules/education/server/service";
 import { CourseCard } from "@/modules/education/ui/CourseCard";
+import { ShareBar } from "@/modules/education/ui/ShareBar";
 import { AppHeader, ButtonLink, Card, EmptyState, Section } from "@/ui";
 
 export const dynamic = "force-dynamic";
@@ -50,6 +51,10 @@ export default async function LearnHome() {
             </li>
           ))}
         </ul>
+      </Section>
+
+      <Section title="Chia sẻ với cộng đồng">
+        <ShareBar />
       </Section>
 
       {continuing.length > 0 && (

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ShoppingBag } from "lucide-react";
+import { Plus, ShoppingBag, Store } from "lucide-react";
 import { CATEGORIES } from "@/modules/market/domain/orders";
 import { LISTING_TYPES } from "@/modules/market/domain/listings";
 import { listPublished, popularTags } from "@/modules/market/server/service";
@@ -26,6 +26,14 @@ export default async function MarketHome({ searchParams }: { searchParams: Promi
       <AppHeader backHref="/home" title="Marketplace" subtitle="Sản phẩm & dịch vụ cho hành trình phát triển của bạn" />
       <div className="space-y-3 px-4">
         <SearchBox placeholder="Tìm sản phẩm, dịch vụ, khóa học…" />
+        <Link href="/market/sell/listings/new" className="pressable flex items-center gap-3 rounded-2xl bg-primary px-4 py-3.5 text-on-primary shadow-card">
+          <Store size={22} className="shrink-0" />
+          <span className="min-w-0 flex-1">
+            <span className="block text-[14px] font-bold">Đăng bán sản phẩm của bạn</span>
+            <span className="block text-[11px] opacity-90">Sách cũ, tài liệu, dịch vụ, khóa học, vé sự kiện</span>
+          </span>
+          <Plus size={20} className="shrink-0" />
+        </Link>
         <nav aria-label="Danh mục" className="no-scrollbar -mx-4 flex gap-3 overflow-x-auto px-4">
           {[["", "Tất cả"] as const, ...Object.entries(CATEGORIES)].map(([key, label]) => {
             const Icon = CATEGORY_ICON[key] ?? ShoppingBag;
